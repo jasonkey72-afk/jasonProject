@@ -98,6 +98,9 @@ Selenium은 실행 시 브라우저 드라이버를 자동으로 내려받습니
 
 ## 6. 개발자용
 
+이어서 개발할 분은 [jobscenario/HANDOVER.md](jobscenario/HANDOVER.md) 를 먼저 읽어 주세요.
+(설계 결정, 기능 추가 방법, 다음 개발 후보를 정리해 두었습니다.)
+
 ```bat
 pip install -r requirements.txt
 python jobscenario_main.py
