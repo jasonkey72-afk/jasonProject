@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>사내 포털 테스트</title></head>
+<body>
+  <h1>사내 포털</h1>
+  <table>
+    <tr><td>사번</td><td><input id="empno" name="empNo" type="text"></td></tr>
+    <tr><td><label for="dept">부서</label></td><td>
+      <select id="dept"><option value="d1">개발부</option><option value="d2">영업부</option></select>
+    </td></tr>
+  </table>
+  <input type="text" placeholder="검색어 입력" id="q">
+  <button id="searchBtn" onclick="document.getElementById('res').innerText='조회 완료'">조회</button>
+  <button data-testid="save-btn">저장하기</button>
+  <a href="#detail" id="lnk">상세보기</a>
+  <div id="res"></div>
+  <iframe id="inner" src="inner.html" width="500" height="200"></iframe>
+</body></html>

@@ -103,6 +103,15 @@ pip install -r requirements.txt
 python jobscenario_main.py
 ```
 
+### 테스트
+
+실제 브라우저를 띄워 동작을 확인합니다. 자세한 내용은 [tests/README.md](tests/README.md).
+
+```bat
+python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 11건
+python tests\test_runner.py      :: 시나리오 실행 / 저장 21건
+```
+
 ### 폴더 구조
 
 ```
