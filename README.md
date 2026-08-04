@@ -1,3 +1,7 @@
+> 이 저장소에는 두 개의 사내 업무 자동화 프로그램이 있습니다.
+> - **jobScenario** — 반복 업무를 단계로 등록해 자동 실행 → [README_jobScenario.md](README_jobScenario.md)
+> - **Excel → PDF 변환기** — 아래 문서
+
 # Excel → PDF 변환기
 
 사내 LLM 적재 등 "PDF 파일만 허용"되는 업무 환경을 위해, Excel 파일(xlsx/xlsm/xls)을
