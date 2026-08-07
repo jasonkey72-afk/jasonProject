@@ -10,4 +10,4 @@ jobScenario - 사내 반복 업무 자동화
   jobscenario/ui      : 모던 tkinter 화면
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
