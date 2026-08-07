@@ -48,6 +48,8 @@ el.dispatchEvent(new Event('change', {bubbles: true}));
 class WebActions:
     """드라이버 하나에 대한 동작 묶음."""
 
+    engine_name = "selenium"
+
     def __init__(self, driver, timeout: float = 15.0, log=None):
         self.driver = driver
         self.locator = SmartLocator(driver, default_timeout=timeout)
@@ -58,6 +60,59 @@ class WebActions:
     def find(self, target, timeout=None, visible_only=True):
         return self.locator.find(target, timeout=timeout, visible_only=visible_only,
                                  log=self.log)
+
+    # -- 엔진 공통 인터페이스 (cdp 판과 같은 이름으로 제공한다) ------------
+
+    @property
+    def alive(self) -> bool:
+        try:
+            _ = self.driver.current_url
+            return True
+        except Exception:
+            return False
+
+    def quit(self):
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+
+    def title(self) -> str:
+        try:
+            return self.driver.title or ""
+        except WebDriverException:
+            return ""
+
+    def current_url(self) -> str:
+        try:
+            return self.driver.current_url or ""
+        except WebDriverException:
+            return ""
+
+    def page_source(self) -> str:
+        try:
+            return self.driver.page_source or ""
+        except WebDriverException:
+            return ""
+
+    def save_screenshot(self, path: str) -> str:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.driver.save_screenshot(str(path))
+        return str(path)
+
+    def pick_element(self, timeout: float = 180.0, on_status=None):
+        from .picker import pick_element
+        return pick_element(self.driver, timeout=timeout, on_status=on_status)
+
+    def highlight(self, element):
+        from .picker import flash
+        flash(self.driver, element)
+
+    def element_label(self, element) -> str:
+        try:
+            return "<%s> %s" % (element.tag_name, (element.text or "")[:30])
+        except WebDriverException:
+            return "요소"
 
     def open_url(self, url: str, timeout: float = 60.0):
         if not url:

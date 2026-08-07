@@ -8,12 +8,13 @@
 ```bat
 pip install -r requirements.txt
 python jobscenario_main.py          :: 프로그램 실행
-python tests\test_webauto.py        :: 동작 확인 (실제 브라우저가 뜹니다)
+python tests\test_cdp.py            :: 동작 확인 (실제 브라우저가 뜹니다)
 python tests\test_runner.py
 build_jobscenario.bat               :: dist\jobScenario.exe 생성
 ```
 
-Python 3.9 이상, Edge 또는 Chrome 설치 필요. 외부 라이브러리는 `selenium` 하나뿐이고,
+Python 3.9 이상, Edge 또는 Chrome 설치 필요. **드라이버 파일은 필요 없습니다.**
+외부 라이브러리는 `websocket-client`(기본 엔진)와 `selenium`(예비 엔진)뿐이고,
 화면은 표준 `tkinter` 로 만들어 별도 UI 라이브러리가 없습니다.
 
 ## 2. 구조 한눈에 보기
@@ -22,10 +23,16 @@ Python 3.9 이상, Edge 또는 Chrome 설치 필요. 외부 라이브러리는 `
 jobscenario_main.py        진입점 (라이브러리 없을 때 안내 메시지까지 처리)
 jobscenario/
   webauto/                 ★ 웹 자동화 공용 모듈 (다른 프로젝트에 그대로 복사 가능)
-    locator.py               SmartLocator — 요소를 찾아내는 핵심
-    picker.py                요소 선택기 — 화면에서 클릭해 선택자 수집
-    actions.py               WebActions — 클릭/입력/선택/대기 등 고수준 동작
-    driver.py                Edge/Chrome 실행, 전용 프로필, 로컬 드라이버 탐지
+    locator.py               전략 생성·점수 기준 (두 엔진이 공유하는 규칙)
+    picker.py                요소 선택기 — 화면에서 클릭해 선택자 수집 (JS)
+    actions.py               WebActions — selenium 엔진 (예비)
+    driver.py                selenium 드라이버 실행 + 버전 진단
+    cdp/                   ★ 드라이버 없는 엔진 (기본)
+      client.py              CDP WebSocket 왕복 (RLock 으로 스레드 안전)
+      launcher.py            설치된 브라우저 찾기 + 디버깅 포트로 실행
+      finder.py              탐색·점수화를 브라우저 안에서 수행하는 JS
+      page.py                탭/프레임/요소 조작
+      actions.py             CDPActions — WebActions 와 같은 인터페이스
   core/
     models.py                Scenario / Step / ACTIONS 목록 / 변수 치환
     storage.py               JSON 저장·불러오기
@@ -61,13 +68,36 @@ jobscenario/
 화면이 조금 바뀌어 한 전략이 깨져도 나머지로 찾아가기 위한 것이므로,
 "정리한다고" 선택자 개수를 줄이면 안정성이 떨어집니다.
 
-### (3) 브라우저는 Session 이 들고 있는다
+### (3) 엔진은 두 개, 인터페이스는 하나
+
+`CDPActions`(기본, 드라이버 없음)와 `WebActions`(예비, selenium)는
+**같은 메서드 이름/인자**를 제공합니다. `runner.py` 는 어느 쪽인지 모릅니다.
+
+새 동작을 추가할 때는 **두 엔진에 모두** 넣어야 합니다.
+넣지 않으면 연결 방식을 바꾼 사용자에게서만 실패합니다.
+`tests/test_runner.py` 가 두 엔진에서 같은 검사를 돌리므로 여기서 걸립니다.
+
+```bat
+set JOBSCN_TEST_ENGINE=cdp      && python tests\test_runner.py
+set JOBSCN_TEST_ENGINE=selenium && python tests\test_runner.py
+```
+
+호환성에서 특히 조심할 곳:
+- **자바스크립트 실행**: selenium 은 `return ...` 형태(함수 본문),
+  CDP 는 식(expression)을 받습니다. `CDPActions.run_script()` 가 `return` 이 보이면
+  자동으로 감싸므로 시나리오 파일은 어느 엔진에서도 동작합니다. 이 처리를 없애면 안 됩니다.
+- **프레임 경로**: 시나리오에는 `[0, 1]`(첫 iframe 의 두 번째 iframe) 형태로 저장합니다.
+  프레임 id 는 열 때마다 바뀌므로 '몇 번째' 로 저장해야 두 엔진이 같은 파일을 씁니다.
+- **탭 순서**: `Target.getTargets` 의 목록 순서는 **생성 순서가 아닙니다.**
+  `CDPBrowser` 가 `Target.targetCreated` 이벤트로 순서를 따로 관리합니다(실제로 겪은 버그).
+
+### (4) 브라우저는 Session 이 들고 있는다
 
 `runner.Session` 이 드라이버를 보관하므로 **단계별 실행 사이에도 브라우저가 유지**됩니다.
 "3단계에서 실패 → 고친 뒤 3단계만 다시 실행" 이 가능한 이유입니다.
 `Runner` 는 매 실행마다 새로 만들어도 되지만 `Session` 은 프로그램이 살아 있는 동안 하나만 씁니다.
 
-### (4) UI 스레드 규칙
+### (5) UI 스레드 규칙
 
 실행은 백그라운드 스레드에서 돌고, 화면 갱신은 `queue` 에 넣어 `_drain_events()` 가
 **UI 스레드에서만** 처리합니다. 작업 스레드에서 위젯을 직접 만지면 안 됩니다.
@@ -82,7 +112,9 @@ jobscenario/
    "print_page": {"label": "화면 인쇄", "group": "웹",
                   "need_target": False, "value_label": ""},
    ```
-2. 실제 동작이 웹이면 `webauto/actions.py` 에 메서드 추가
+2. 실제 동작이 웹이면 **두 엔진 모두**에 같은 이름의 메서드 추가
+   - `webauto/cdp/actions.py` (기본 엔진)
+   - `webauto/actions.py` (예비 엔진)
 3. `core/runner.py` 의 `_execute()`(웹) 또는 `_execute_local()`(프로그램)에 분기 한 줄 추가
 
 화면(콤보박스, 입력칸 활성화, 찾아보기 버튼)은 `ACTIONS` 를 보고 자동으로 맞춰지므로
@@ -104,16 +136,21 @@ UI 는 손대지 않아도 됩니다.
 | 데스크톱 프로그램 조작 | 지금은 실행/파일 열기까지만. 창 안의 버튼 클릭은 `pywinauto` 등이 필요 |
 | 사용자 조작 기록(레코더) | 클릭·입력을 통째로 녹화해 단계를 자동 생성 |
 | 결과 후처리 | 내려받은 엑셀을 같은 저장소의 Excel→PDF 변환기와 연결 |
+| 다운로드 완료 대기 | CDP `Browser.downloadProgress` 로 '내려받기 끝날 때까지 대기' 단계 추가 |
+| selenium 엔진 정리 | 현장에서 cdp 엔진이 충분히 검증되면 `actions.py`/`driver.py` 를 걷어내 유지보수를 반으로 줄인다 |
 
 ## 6. Playwright 검토 결과 (2026-08)
 
-"Selenium 대신/함께 Playwright 를 쓰면 어떤가" 를 검토했고 **당분간 쓰지 않기로** 했습니다.
+"Selenium 대신/함께 Playwright 를 쓰면 어떤가" 를 검토했고 **쓰지 않기로** 했습니다.
 같은 논의가 반복되지 않도록 근거를 남깁니다.
 
-**Playwright 가 나은 점**
-- 드라이버 버전을 맞출 필요가 없다(`channel="msedge"` 로 설치된 Edge 를 CDP 로 직접 조작).
-  Edge 가 업데이트될 때마다 드라이버를 다시 배포해야 하는 문제가 사라진다 — 가장 큰 장점.
-- Shadow DOM 통과, trace viewer, codegen(레코더)
+**Playwright 의 가장 큰 장점은 드라이버 버전 문제가 없다는 것**이었는데,
+그 이유는 Playwright 가 CDP 로 브라우저를 직접 조작하기 때문입니다.
+**같은 방법을 직접 구현해(`webauto/cdp`) 그 장점만 가져왔습니다.**
+Node 드라이버 46MB, 스레드 제약, 배포 복잡도는 지지 않았습니다.
+
+**아직 Playwright 가 나은 점**
+- trace viewer, codegen(레코더)
 
 **그럼에도 쓰지 않는 이유**
 1. **스레드 제약**: Playwright 동기 API 는 객체를 만든 스레드에서만 쓸 수 있다.
@@ -124,24 +161,30 @@ UI 는 손대지 않아도 됩니다.
    PyInstaller 로 Node 드라이버를 묶는 것도 까다로워 "빌드 스크립트 더블클릭이면 끝" 이 깨질 수 있다.
 3. **엔진 둘 = 유지보수 둘**: 부서에서 쓰는 도구에 재현 경로가 두 배가 된다.
 
-**대신 한 것** — 이득의 상당 부분을 훨씬 싸게 흡수했다.
-- Shadow DOM 탐색 (`locator.py` 의 `BY_DEEP`)
+**대신 한 것** — 이득을 훨씬 싸게 흡수했다.
+- **자체 CDP 엔진(`webauto/cdp`)** — 드라이버 버전 문제를 없앴다. 의존성은
+  `websocket-client` 81KB 뿐이고, Playwright 와 달리 **스레드 제약도 없다**
+  (`CDPClient` 가 RLock 으로 요청을 직렬화하므로 여러 스레드에서 함께 쓸 수 있다).
+- Shadow DOM 탐색 (`locator.py` 의 `BY_DEEP`, CDP 판은 `finder.py`)
 - 실패 시 화면·HTML 자동 저장 (trace viewer 의 실용적 대체)
-- 브라우저/드라이버 버전 비교 후 받아야 할 버전까지 안내 (`driver.diagnose`)
+- selenium 방식을 쓸 때를 위한 드라이버 버전 진단 (`driver.diagnose`)
 
 **다시 검토해야 할 신호**
-- React/Vue 기반 신규 사내 시스템이 늘어 Shadow DOM/동적 렌더링에서 계속 막힐 때
-- 드라이버 버전 때문에 분기에 두세 번 이상 재배포해야 할 때
+- 자체 CDP 엔진으로 못 다루는 CDP 영역이 늘어날 때(파일 다운로드 추적, 네트워크 가로채기 등)
+- 조작 레코더가 꼭 필요해지고 codegen 을 그대로 쓰고 싶을 때
 
 **갈아탈 때 알아둘 것**: `Target` 이 저장하는 선택자가 전부 표준 CSS/XPath 라
-Playwright 가 그대로 받는다. 즉 **탐색 로직 재작성이 아니라 어댑터 한 겹**이면 되고,
-프레임 순회는 `page.frames`(평평한 목록)로 지금보다 단순해진다.
-미리 추상화 계층을 만들어 둘 필요는 없다.
+Playwright 가 그대로 받는다. 즉 **탐색 로직 재작성이 아니라 어댑터 한 겹**이면 된다.
+미리 추상화 계층을 만들어 둘 필요는 없다(이미 엔진 인터페이스가 그 역할을 한다).
 
 ## 7. 자주 막히는 부분
 
-- **드라이버 버전**: 브라우저와 드라이버의 **주 버전이 같아야** 합니다. 사내망에서 자동
-  내려받기가 막히면 `msedgedriver.exe` 를 exe 옆에 두세요(`driver.py` 가 자동 인식).
+- **드라이버 버전**: 기본 엔진(cdp)에서는 **해당되지 않습니다.** 예비용 selenium 엔진을
+  쓸 때만 브라우저와 드라이버의 주 버전이 같아야 하고, 사내망에서 자동 내려받기가 막히면
+  `msedgedriver.exe` 를 exe 옆에 두세요(`driver.py` 가 자동 인식).
+- **localhost 는 프록시를 우회해야 합니다**: 사내 프록시가 설정된 PC 에서 브라우저
+  디버깅 포트로 가는 요청이 프록시로 새어 나가면 연결이 안 됩니다.
+  `launcher._http_json()` 과 `client.NO_PROXY_HOSTS` 가 이를 막고 있습니다.
 - **exe 빌드는 Windows 에서만**: 리눅스/컨테이너에서는 Windows exe 를 만들 수 없습니다.
 - **실패 기록**: 단계가 실패하면 `%LOCALAPPDATA%\jobScenario\failures` 에
   화면·HTML·주소가 자동으로 남습니다. 원인 파악은 여기서 시작하세요.

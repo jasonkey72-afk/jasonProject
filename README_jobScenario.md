@@ -4,6 +4,8 @@
 **단계(step)로 한 번만 등록**해 두고, 다음부터는 버튼 한 번으로 재현하는 Windows용 프로그램입니다.
 
 - 지원 브라우저: **Microsoft Edge**(기본), **Chrome**
+- **드라이버(msedgedriver.exe) 가 필요 없습니다.** 설치된 Edge 에 직접 연결하므로
+  Edge 가 자동 업데이트돼도 다시 배포할 일이 없습니다. (아래 1-2 참고)
 - 배포 방식: `jobScenario.exe` 파일 하나 (부서원 PC에 Python 설치 불필요)
 - 시나리오는 JSON 파일 한 개로 저장되므로 **동료에게 그대로 보내주면 같은 자동화를 바로 사용**할 수 있습니다.
 
@@ -20,6 +22,34 @@
 | (추가) 화면이 늦게 그려짐 | 지정한 대기 시간까지 반복 재시도 |
 | (추가) 클릭이 안 먹음 | 일반 클릭 → 스크롤 후 클릭 → JavaScript 클릭 순으로 자동 재시도 |
 | (추가) Shadow DOM | 최신 웹 컴포넌트 내부도 경계를 넘어 탐색 (요소 선택기도 안쪽 요소를 정확히 인식) |
+| (추가) 드라이버 버전 불일치 | 드라이버를 아예 쓰지 않는 방식으로 해결 (아래 1-2) |
+
+## 1-2. 드라이버 버전 문제를 없앤 방법
+
+가장 자주, 가장 크게 발목을 잡던 문제입니다.
+
+> "이 버전의 ChromeDriver 는 Chrome 147 만 지원합니다. 현재 브라우저는 141 입니다."
+
+`msedgedriver.exe` / `chromedriver.exe` 는 브라우저와 **주 버전이 다르면 실행 자체를 거부**합니다.
+Edge 는 약 4주마다 자동 업데이트되므로, 드라이버 방식은 배포가 끝나도
+담당자가 **매달 드라이버를 새로 받아 다시 배포**해야 했습니다.
+
+jobScenario 는 기본으로 **드라이버를 쓰지 않습니다.**
+설치된 Edge 를 디버깅 포트와 함께 직접 실행하고 CDP(Chrome DevTools Protocol) 로
+브라우저와 바로 대화합니다. CDP 는 브라우저에 원래 들어 있는 기능이고
+**버전 검사를 하지 않으므로 이 문제 자체가 사라집니다.**
+
+| | 드라이버 없이(기본) | selenium 드라이버(예비) |
+|---|---|---|
+| 별도 파일 | **필요 없음** | msedgedriver.exe 필요 |
+| Edge 업데이트 시 | **그대로 동작** | 드라이버 재배포 필요 |
+| 사내망 차단 영향 | **없음** | 드라이버 내려받기가 막히면 사용 불가 |
+| 요소 탐색 | 브라우저 안에서 한 번에 처리(더 빠름) | 왕복이 많음 |
+| iframe | 프레임 이동 없이 모든 프레임 동시 탐색 | 프레임을 옮겨 다니며 탐색 |
+
+화면 오른쪽 위 **[연결 방식]** 에서 고를 수 있고, 기본값이 `드라이버 없이(권장)` 입니다.
+혹시 특정 사이트에서 문제가 생기면 `selenium 드라이버` 로 바꿔 쓸 수 있습니다.
+(두 방식 모두 **같은 시나리오 파일**을 씁니다)
 
 ## 2. 사용 방법 (부서원)
 
@@ -91,9 +121,12 @@ build_jobscenario.bat
 
 ### 사내망에서 드라이버 다운로드가 막혀 있는 경우
 
-Selenium은 실행 시 브라우저 드라이버를 자동으로 내려받습니다. 방화벽에 막혀 있다면
-설치된 Edge와 **같은 버전**의 `msedgedriver.exe`(Chrome이면 `chromedriver.exe`)를
-받아 **exe와 같은 폴더**에 두면 자동으로 인식합니다.
+**기본 연결 방식(드라이버 없이)에서는 해당되지 않습니다.** 드라이버를 쓰지 않으니
+내려받을 것도, 버전을 맞출 것도 없습니다.
+
+예비용 `selenium 드라이버` 방식을 쓸 때만 필요합니다. 그 경우 설치된 Edge와
+**같은 버전**의 `msedgedriver.exe`(Chrome이면 `chromedriver.exe`)를 받아
+**exe와 같은 폴더**에 두면 자동으로 인식합니다.
 
 - Edge 버전 확인: 주소창에 `edge://settings/help`
 - 드라이버 받는 곳: `https://developer.microsoft.com/microsoft-edge/tools/webdriver/`
@@ -113,19 +146,26 @@ python jobscenario_main.py
 실제 브라우저를 띄워 동작을 확인합니다. 자세한 내용은 [tests/README.md](tests/README.md).
 
 ```bat
-python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 / Shadow DOM 14건
+python tests\test_cdp.py         :: 드라이버 없는 엔진 20건
 python tests\test_runner.py      :: 시나리오 실행 / 저장 / 실패 기록 25건
+python tests\test_webauto.py     :: selenium 엔진 14건
 ```
 
 ### 폴더 구조
 
 ```
 jobscenario/
-  webauto/          ★ 재사용 가능한 웹 자동화 모듈 (selenium 외 의존성 없음)
-    locator.py        SmartLocator - 다중 전략 + 전 프레임 탐색 (핵심)
+  webauto/          ★ 재사용 가능한 웹 자동화 모듈
+    locator.py        SmartLocator - 다중 전략 + 전 프레임 탐색 (탐색 규칙의 기준)
     picker.py         화면에서 클릭해 선택자를 수집하는 요소 선택기
-    actions.py        클릭/입력/선택/대기 등 실패에 강한 고수준 동작
-    driver.py         Edge/Chrome 실행, 전용 프로필, 로컬 드라이버 탐지
+    actions.py        selenium 엔진 (예비)
+    driver.py         Edge/Chrome 실행, 전용 프로필, 드라이버 버전 진단
+    cdp/            ★ 드라이버 없는 엔진 (기본)
+      client.py       CDP WebSocket 통신 (스레드 안전)
+      launcher.py     설치된 브라우저 찾기 + 디버깅 포트로 실행
+      finder.py       요소 탐색·점수화를 브라우저 안에서 수행하는 JS
+      page.py         탭/프레임/요소 조작
+      actions.py      selenium 판과 같은 인터페이스
   core/
     models.py         Scenario / Step / 변수 치환
     storage.py        JSON 저장·불러오기
@@ -139,21 +179,28 @@ jobscenario/
 
 ### 다른 웹 자동화 프로젝트에서 재사용하기
 
-`jobscenario/webauto` 폴더만 복사하면 됩니다. (의존성: `selenium`)
+`jobscenario/webauto` 폴더만 복사하면 됩니다.
+(의존성: 기본 엔진은 `websocket-client`, 예비 엔진은 `selenium`)
 
 ```python
-from webauto import create_driver, WebActions, pick_element
+from webauto.cdp import CDPActions          # 드라이버 불필요
 
-driver = create_driver("edge")                 # 전용 프로필로 Edge 실행
-web = WebActions(driver)
-
+web = CDPActions.start("edge")              # 설치된 Edge 를 직접 실행
 web.open_url("https://portal.company.com")
-web.input_text("label=사번", "20250001")        # 라벨 옆 입력창 자동 탐색
-web.click("text=조회")                          # iframe 안에 있어도 자동으로 찾아감
+web.input_text("label=사번", "20250001")     # 라벨 옆 입력창 자동 탐색
+web.click("text=조회")                       # iframe 안에 있어도 자동으로 찾아감
 print(web.get_text("#result"))
 
-target = pick_element(driver)                   # 사용자가 화면에서 클릭 → 선택자 수집
-json_data = target.to_dict()                    # 파일로 저장해 두고 재사용
+target = web.pick_element()                 # 사용자가 화면에서 클릭 → 선택자 수집
+json_data = target.to_dict()                # 파일로 저장해 두고 재사용
+web.quit()
+```
+
+selenium 을 쓰던 코드는 `WebActions` 로 바꾸기만 하면 **같은 메서드**로 동작합니다.
+
+```python
+from webauto import create_driver, WebActions
+web = WebActions(create_driver("edge"))     # 위와 동일한 사용법
 ```
 
 `Target` 은 JSON으로 저장/복원해도 그대로 동작하므로, 화면 구조가 조금 바뀌어도
@@ -172,11 +219,13 @@ json_data = target.to_dict()                    # 파일로 저장해 두고 재
 
 | 증상 | 원인 / 해결 |
 |---|---|
-| 브라우저가 실행되지 않음 | Edge/Chrome 설치 확인. 사내망이면 드라이버를 exe 옆에 배치(5장 참고) |
+| 브라우저가 실행되지 않음 | Edge/Chrome 설치 확인. 설치 경로가 특이하면 환경변수 `JOBSCN_BROWSER_PATH` 에 실행 파일 경로 지정 |
+| 드라이버 버전이 안 맞다는 오류 | **[연결 방식]** 이 `드라이버 없이(권장)` 인지 확인하세요. 이 방식은 드라이버를 쓰지 않습니다 |
+| 특정 사이트만 동작이 이상함 | **[연결 방식]** 을 `selenium 드라이버` 로 바꿔 비교해 보세요(시나리오는 그대로 사용) |
 | "화면에서 대상을 찾지 못했습니다" | 화면이 늦게 뜨는 경우 → 단계의 **대기 시간**을 늘리기. 화면이 바뀐 경우 → 해당 단계를 열어 **[브라우저에서 선택]** 으로 재지정 |
 | 로그인 화면이 매번 나옴 | 시나리오의 **전용 프로필 사용**이 켜져 있는지 확인. 회사 정책상 매번 로그인해야 하는 사이트는 `사용자에게 값 입력받기` 단계로 처리 |
 | 클릭은 됐는데 다음 화면이 안 뜸 | 해당 단계의 **실행 후 쉬기**를 1~2초로 늘리거나, 다음 단계 앞에 `요소가 나타날 때까지 대기` 를 추가 |
 | 팝업 창으로 넘어가지 않음 | 새 창은 자동으로 따라가지만, 안 되면 `탭 전환`(값 `-1`) 단계를 추가 |
 | 실패 원인을 모르겠음 | 실패한 순간의 **화면·HTML이 자동 저장**됩니다. 실행 카드의 **[실패 기록 열기]** 로 확인하세요 |
-| 브라우저 버전이 올라가 드라이버가 안 맞음 | 실행 실패 시 **설치된 Edge 버전과 드라이버 버전을 비교해** 받아야 할 버전과 위치를 알려줍니다 |
+| 브라우저 버전이 올라가 드라이버가 안 맞음 | 기본 방식에서는 발생하지 않습니다. selenium 방식일 때는 설치된 Edge 버전과 드라이버 버전을 비교해 받아야 할 버전과 위치를 알려줍니다 |
 | 중간 단계만 다시 실행하고 싶음 | 해당 단계를 선택하고 **[▷ 선택 단계 실행]** — 브라우저 상태가 유지됩니다 |

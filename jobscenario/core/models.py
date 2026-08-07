@@ -151,6 +151,7 @@ class Scenario:
     title: str = ""                      # 업무 제목 (Scenario 명)
     description: str = ""
     browser: str = "edge"
+    engine: str = "cdp"                  # cdp = 드라이버 불필요(기본), selenium = 예비
     steps: list = field(default_factory=list)
     keep_browser: bool = True            # 실행 후 브라우저를 열어 둘지
     use_profile: bool = True             # 로그인 유지용 전용 프로필 사용
@@ -162,6 +163,7 @@ class Scenario:
             "title": self.title,
             "description": self.description,
             "browser": self.browser,
+            "engine": self.engine,
             "keep_browser": self.keep_browser,
             "use_profile": self.use_profile,
             "created": self.created,
@@ -172,7 +174,7 @@ class Scenario:
     @staticmethod
     def from_dict(d: dict) -> "Scenario":
         sc = Scenario()
-        for k in ("title", "description", "browser", "created", "modified"):
+        for k in ("title", "description", "browser", "engine", "created", "modified"):
             if d.get(k) is not None:
                 setattr(sc, k, d[k])
         sc.keep_browser = bool(d.get("keep_browser", True))

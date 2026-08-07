@@ -278,11 +278,10 @@ class StepDialog(tk.Toplevel):
         def work():
             try:
                 web = self.session.ensure_browser(self.scenario)
-                url = web.driver.current_url or ""
+                url = web.current_url() or ""
                 if url in ("", "about:blank", "data:,") and self._first_url():
                     web.open_url(self._first_url())
-                holder["target"] = picker.pick_element(
-                    web.driver, on_status=lambda m: None)
+                holder["target"] = web.pick_element(on_status=lambda m: None)
             except Exception as e:                     # 창을 닫았거나 취소한 경우
                 holder["error"] = e
 
@@ -322,10 +321,9 @@ class StepDialog(tk.Toplevel):
         try:
             web = self.session.ensure_browser(self.scenario)
             el = web.find(target, timeout=8)
-            picker.flash(web.driver, el)
-            self.status.configure(
-                text="찾았습니다 : <%s> %s" % (el.tag_name, (el.text or "")[:30]),
-                fg=T.SUCCESS)
+            web.highlight(el)
+            self.status.configure(text="찾았습니다 : %s" % web.element_label(el),
+                                  fg=T.SUCCESS)
         except Exception as e:
             self.status.configure(text="찾지 못했습니다: %s" % str(e)[:90], fg=T.DANGER)
 

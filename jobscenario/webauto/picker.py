@@ -231,6 +231,10 @@ PICKER_JS = r"""
 READ_JS = ("var v = window.__JS_PICK__; window.__JS_PICK__ = null; "
            "return v ? v : null;")
 
+# CDP 의 Runtime.evaluate 는 식(expression)을 받으므로 같은 내용을 식으로도 준비한다
+READ_JS_EXPR = ("(function () { var v = window.__JS_PICK__; "
+                "window.__JS_PICK__ = null; return v ? v : null; })()")
+
 STOP_JS = ("if (window.__JSP_STOP__) { window.__JSP_STOP__(); } "
            "window.__JSP_ON__ = false; window.__JS_PICK__ = null;")
 

@@ -16,8 +16,9 @@ import threading
 import time
 from pathlib import Path
 
-from ..webauto.driver import create_driver, quit_driver, data_dir
+from ..webauto.driver import create_driver, data_dir
 from ..webauto.actions import WebActions
+from ..webauto.cdp import CDPActions
 from ..webauto.locator import Target, parse_target, ElementNotFound
 from . import programs
 from .models import Scenario, Step, expand_vars, action_label
@@ -34,36 +35,44 @@ class Session:
     """브라우저와 변수를 담아 두는 실행 세션(단계별 실행 사이에도 유지된다)."""
 
     def __init__(self, log=None):
-        self.driver = None
-        self.web = None
+        self.web = None                   # 실행 엔진(CDPActions 또는 WebActions)
         self.variables = {}
         self.log = log or (lambda msg: None)
         self.last_failure_dir = None      # 마지막으로 실패 기록을 남긴 폴더
 
     @property
     def browser_alive(self) -> bool:
-        if self.driver is None:
-            return False
-        try:
-            _ = self.driver.current_url
-            return True
-        except Exception:
-            return False
+        return self.web is not None and self.web.alive
 
     def ensure_browser(self, scenario: Scenario):
         """브라우저가 없거나 사용자가 닫았으면 새로 띄운다."""
         if self.browser_alive:
             return self.web
-        quit_driver(self.driver)
-        self.log("브라우저(%s)를 실행합니다..." % scenario.browser)
-        self.driver = create_driver(
-            browser=scenario.browser,
-            profile=scenario.use_profile,
-            download_dir=str(data_dir() / "downloads"),
-            log=self.log,
-        )
-        self.web = WebActions(self.driver, log=self.log)
+        self.close_browser()
+
+        engine = (scenario.engine or "cdp").lower()
+        profile_dir = ""
+        if scenario.use_profile:
+            profile_dir = str(data_dir() / ("%s_profile" % scenario.browser))
+        downloads = str(data_dir() / "downloads")
+
+        if engine == "cdp":
+            # 드라이버 없이 브라우저에 직접 연결한다(버전 문제가 생기지 않는다)
+            self.web = CDPActions.start(
+                browser=scenario.browser, user_data_dir=profile_dir,
+                download_dir=downloads, log=self.log)
+        else:
+            self.log("브라우저(%s)를 실행합니다... (selenium 엔진)" % scenario.browser)
+            driver = create_driver(
+                browser=scenario.browser, profile=scenario.use_profile,
+                download_dir=downloads, log=self.log)
+            self.web = WebActions(driver, log=self.log)
         return self.web
+
+    @property
+    def driver(self):
+        """예전 코드 호환용(selenium 엔진일 때만 값이 있다)."""
+        return getattr(self.web, "driver", None)
 
     def capture_failure(self, step_no: int, step_name: str) -> str:
         """
@@ -78,16 +87,13 @@ class Session:
                                            % (time.strftime("%Y%m%d_%H%M%S"), step_no, safe))
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            try:
-                self.driver.switch_to.default_content()
-            except Exception:
-                pass
-            self.driver.save_screenshot(str(folder / "화면.png"))
-            (folder / "화면.html").write_text(self.driver.page_source, encoding="utf-8")
+            self.web.save_screenshot(str(folder / "화면.png"))
+            (folder / "화면.html").write_text(self.web.page_source(), encoding="utf-8")
             (folder / "정보.txt").write_text(
-                "시각: %s\n단계: %d단계 %s\n주소: %s\n제목: %s\n"
+                "시각: %s\n단계: %d단계 %s\n주소: %s\n제목: %s\n엔진: %s\n"
                 % (time.strftime("%Y-%m-%d %H:%M:%S"), step_no, step_name,
-                   self.driver.current_url, self.driver.title),
+                   self.web.current_url(), self.web.title(),
+                   getattr(self.web, "engine_name", "?")),
                 encoding="utf-8")
             self.last_failure_dir = folder
             return str(folder)
@@ -95,8 +101,8 @@ class Session:
             return ""
 
     def close_browser(self):
-        quit_driver(self.driver)
-        self.driver = None
+        if self.web is not None:
+            self.web.quit()
         self.web = None
 
 
@@ -188,7 +194,7 @@ class Runner:
 
         if action == "open_url":
             web.open_url(value)
-            return web.driver.title[:60]
+            return web.title()[:60]
         if action == "click":
             web.click(target, step.timeout)
             return ""

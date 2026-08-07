@@ -28,6 +28,12 @@ from ..core.runner import Runner, Session, READY, RUNNING, DONE, FAILED, SKIPPED
 from ..webauto.driver import data_dir, diagnose, BROWSERS
 
 APP_TITLE = "jobScenario - 반복 업무 자동화"
+
+# 연결 방식(엔진). 기본은 드라이버가 필요 없는 CDP 직접 연결.
+ENGINE_CDP = "드라이버 없이(권장)"
+ENGINE_SELENIUM = "selenium 드라이버"
+ENGINE_CODE = {ENGINE_CDP: "cdp", ENGINE_SELENIUM: "selenium"}
+ENGINE_LABEL = {v: k for k, v in ENGINE_CODE.items()}
 SETTINGS = data_dir() / "settings.json"
 
 
@@ -84,6 +90,13 @@ class JobScenarioApp(tk.Tk):
 
         right = tk.Frame(head, bg=T.DARK)
         right.pack(side="right", padx=20)
+        tk.Label(right, text="연결 방식", bg=T.DARK, fg="#cbd5e1",
+                 font=T.FONT_SM).pack(side="left", padx=(0, 6))
+        self.engine_var = tk.StringVar(value=self.settings.get("engine", ENGINE_CDP))
+        eng = ttk.Combobox(right, values=[ENGINE_CDP, ENGINE_SELENIUM], state="readonly",
+                           width=18, textvariable=self.engine_var)
+        eng.pack(side="left", padx=(0, 14))
+        eng.bind("<<ComboboxSelected>>", lambda e: self._on_engine_change())
         tk.Label(right, text="브라우저", bg=T.DARK, fg="#cbd5e1",
                  font=T.FONT_SM).pack(side="left", padx=(0, 6))
         self.browser_var = tk.StringVar(value=self.settings.get("browser", "edge"))
@@ -242,6 +255,17 @@ class JobScenarioApp(tk.Tk):
         self.settings["browser"] = self.scenario.browser
         self._save_settings()
 
+    def _on_engine_change(self):
+        """연결 방식을 바꾸면 지금 열린 브라우저는 닫고 다음 실행 때 새로 띄운다."""
+        label = self.engine_var.get()
+        self.settings["engine"] = label
+        self._save_settings()
+        self.scenario.engine = ENGINE_CODE.get(label, "cdp")
+        if self.session.browser_alive:
+            self.session.close_browser()
+            self._log("연결 방식을 바꿨습니다. 브라우저를 닫았습니다.")
+        self._status("연결 방식: %s" % label)
+
     def _enqueue_log(self, msg: str):
         self.events.put(("log", msg))
 
@@ -311,6 +335,7 @@ class JobScenarioApp(tk.Tk):
         self.desc_entry.delete(0, "end")
         self.desc_entry.insert(0, self.scenario.description)
         self.browser_var.set(self.scenario.browser or "edge")
+        self.engine_var.set(ENGINE_LABEL.get(self.scenario.engine or "cdp", ENGINE_CDP))
         self._refresh_steps()
         self._status("'%s' 을(를) 불러왔습니다. (%d단계)"
                      % (self.scenario.title, len(self.scenario.steps)))
@@ -354,6 +379,7 @@ class JobScenarioApp(tk.Tk):
         self.scenario.title = self.title_entry.get().strip()
         self.scenario.description = self.desc_entry.get().strip()
         self.scenario.browser = self.browser_var.get()
+        self.scenario.engine = ENGINE_CODE.get(self.engine_var.get(), "cdp")
 
     def _refresh_steps(self):
         self.tree.delete(*self.tree.get_children())
@@ -531,8 +557,19 @@ class JobScenarioApp(tk.Tk):
         self._status("브라우저를 닫았습니다.")
 
     def _driver_help(self, e: Exception) -> str:
-        """설치된 브라우저/드라이버 버전을 실제로 읽어 조치 방법까지 알려준다."""
-        return diagnose(self.browser_var.get(), e)
+        """실패 원인을 연결 방식에 맞게 안내한다."""
+        browser = self.browser_var.get()
+        if ENGINE_CODE.get(self.engine_var.get()) == "cdp":
+            name = "Microsoft Edge" if browser == "edge" else "Google Chrome"
+            return ("브라우저를 실행하지 못했습니다.\n\n%s\n\n"
+                    "이 방식은 드라이버가 필요 없으므로 버전 문제는 아닙니다.\n"
+                    "확인해 주세요\n"
+                    " · %s 가 설치되어 있는지\n"
+                    " · 설치 경로가 특이하면 환경변수 JOBSCN_BROWSER_PATH 에\n"
+                    "   실행 파일 경로를 지정할 수 있습니다.\n"
+                    " · 보안 프로그램이 디버깅 포트 연결을 막고 있지 않은지"
+                    % (str(e)[:300], name))
+        return diagnose(browser, e)
 
     def _open_failures(self):
         """마지막으로 실패한 화면이 저장된 폴더를 연다."""

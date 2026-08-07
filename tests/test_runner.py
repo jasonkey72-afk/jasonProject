@@ -12,31 +12,29 @@ import sys
 import tempfile
 from pathlib import Path
 
-from conftest_driver import make_driver, MAIN_PAGE, Report  # noqa: E402
+from conftest_driver import make_engine, test_engine, MAIN_PAGE, Report  # noqa: E402
 
 from jobscenario.core import storage
 from jobscenario.core.models import Scenario, Step, expand_vars, find_vars
 from jobscenario.core.runner import Runner, Session, DONE, SKIPPED
-from jobscenario.webauto.actions import WebActions
 from jobscenario.webauto import picker
 
-r = Report("runner")
-driver = make_driver()
+r = Report("runner (%s 엔진)" % test_engine())
 
 logs, states, notes = [], {}, []
 session = Session(log=logs.append)
-session.driver = driver
-session.web = WebActions(driver, log=logs.append)
+session.web = make_engine(log=logs.append)
+web = session.web
 
 try:
     # 사용자가 요소 선택기로 잡았을 때와 같은 형태의 대상을 만든다
-    driver.get(MAIN_PAGE)
-    driver.execute_script(picker.PICKER_JS)
-    driver.execute_script("document.getElementById('searchBtn')"
-                          ".dispatchEvent(new MouseEvent('click',{bubbles:true}));")
-    picked = picker.build_target(json.loads(driver.execute_script(picker.READ_JS)), [])
+    web.open_url(MAIN_PAGE)
+    web.run_script(picker.PICKER_JS)
+    web.run_script("document.getElementById('searchBtn')"
+                   ".dispatchEvent(new MouseEvent('click',{bubbles:true}))")
+    picked = picker.build_target(json.loads(web.run_script(picker.READ_JS)), [])
 
-    scenario = Scenario(title="일일 실적 조회", steps=[
+    scenario = Scenario(title="일일 실적 조회", engine=test_engine(), steps=[
         Step(name="포털 열기", action="open_url", value=MAIN_PAGE, wait_after=0),
         Step(name="사번 입력", action="input", target_text="label=사번",
              value="{{사번}}", wait_after=0),
@@ -67,12 +65,10 @@ try:
     ok = runner.run_all(0)
 
     r.expect("전체 일괄 실행 성공", ok, [l for l in logs if "✕" in l])
-    r.expect("사번이 실제로 입력됨",
-             driver.find_element("id", "empno").get_attribute("value") == "20250001")
-    r.expect("부서 선택됨",
-             driver.find_element("id", "dept").get_attribute("value") == "d2")
-    r.expect("선택기로 등록한 대상 클릭됨",
-             driver.find_element("id", "res").text == "조회 완료")
+    r.expect("사번이 실제로 입력됨", web.get_text("id=empno") == "20250001")
+    r.expect("부서 선택됨",   # return 을 붙인 형태는 두 엔진에서 모두 동작한다
+             web.run_script("return document.getElementById('dept').value") == "d2")
+    r.expect("선택기로 등록한 대상 클릭됨", web.get_text("#res") == "조회 완료")
     r.expect("값 읽어 변수에 저장", session.variables.get("결과") == "조회 완료",
              session.variables)
     r.expect("안내 메시지에 변수 치환", notes == ["완료: 조회 완료"], notes)
@@ -82,16 +78,15 @@ try:
              all(states.get(i) == DONE for i in range(8)), states)
 
     # --- 단계별 실행 (브라우저가 유지되어 이어서 실행된다) ---
-    driver.switch_to.default_content()
-    driver.find_element("id", "empno").clear()
+    web.run_script("document.getElementById('empno').value = ''")
     one = Runner(scenario, session, log=logs.append,
                  on_step=lambda i, s, m="": states.__setitem__(i, s), ask=lambda n: "x")
     r.expect("단계별 실행(2단계만)", one.run_one(1))
     r.expect("단계별 실행 결과가 화면에 반영됨",
-             driver.find_element("id", "empno").get_attribute("value") == "20250001")
+             web.get_text("id=empno") == "20250001")
 
     # --- 필수 단계가 실패하면 즉시 중단 ---
-    bad = Scenario(title="실패 확인", steps=[
+    bad = Scenario(title="실패 확인", engine=test_engine(), steps=[
         Step(name="없는 버튼", action="click", target_text="text=없는버튼QQ",
              timeout=2, wait_after=0),
         Step(name="실행되면 안 되는 단계", action="message", value="hi", wait_after=0),
@@ -131,7 +126,7 @@ try:
     r.expect("변수 이름 추출", find_vars("{{a}}/{{오늘}}/{{b}}") == ["a", "b"])
 finally:
     try:
-        driver.quit()
+        session.close_browser()
     except Exception:
         pass
 
