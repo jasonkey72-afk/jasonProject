@@ -46,8 +46,37 @@ STRATEGY_SCORE = {
     "text": 72,
     "css": 60,
     "xpath": 55,
+    "deep": 58,        # Shadow DOM 안쪽까지 파고드는 CSS 탐색
     "abs_xpath": 30,
 }
+
+# Shadow DOM(최신 웹 컴포넌트) 안에 숨은 요소를 찾는 표시.
+# selenium 의 표준 By 가 아니므로 _find_by_strategy 에서 따로 처리한다.
+BY_DEEP = "deep css"
+
+# shadowRoot 를 뚫고 들어가며 CSS 선택자로 요소를 모으는 스크립트
+DEEP_QUERY_JS = """
+var sel = arguments[0], out = [], seen = new Set();
+function walk(root) {
+  if (!root || seen.has(root)) { return; }
+  seen.add(root);
+  try { root.querySelectorAll(sel).forEach(function (e) { out.push(e); }); }
+  catch (e) { return; }
+  var all = root.querySelectorAll('*');
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].shadowRoot) { walk(all[i].shadowRoot); }
+  }
+}
+walk(document);
+return out;
+"""
+
+# 이 화면에 Shadow DOM 이 하나라도 있는지 (있을 때만 깊은 탐색을 켠다)
+HAS_SHADOW_JS = """
+var all = document.querySelectorAll('*');
+for (var i = 0; i < all.length; i++) { if (all[i].shadowRoot) { return true; } }
+return false;
+"""
 
 # 이 점수 이상이면 '어느 프레임에서 찾아도 믿을 수 있는' 전략으로 본다.
 STRONG_MIN = 50
@@ -207,6 +236,7 @@ def parse_target(spec, desc: str = "") -> Target:
       label=사번                -> 라벨 옆 입력창
       placeholder=검색어 입력   -> placeholder
       css=...  xpath=...        -> 명시적 지정
+      deep=#code                -> Shadow DOM(웹 컴포넌트) 안쪽까지 탐색
       그 외 일반 글자           -> 글자 + 라벨을 모두 시도
     """
     if isinstance(spec, Target):
@@ -228,6 +258,9 @@ def parse_target(spec, desc: str = "") -> Target:
         t.strategies = [Strategy("name", By.NAME, val, STRATEGY_SCORE["name"])]
     elif key == "css" and val:
         t.strategies = [Strategy("css", By.CSS_SELECTOR, val, STRATEGY_SCORE["css"])]
+    elif key == "deep" and val:
+        # Shadow DOM 안쪽까지 파고들어 찾는다
+        t.strategies = [Strategy("deep", BY_DEEP, val, STRATEGY_SCORE["deep"])]
     elif key == "xpath" and val:
         t.strategies = [Strategy("xpath", By.XPATH, val, STRATEGY_SCORE["xpath"])]
     elif key == "text" and val:
@@ -269,6 +302,8 @@ class SmartLocator:
         self.default_timeout = default_timeout
         self.poll = poll
         self.last_frame_path = []      # 마지막으로 요소를 찾은 iframe 경로
+        # Shadow DOM 깊은 탐색은 느리므로, 평소에는 끄고 마지막 시도에서만 켠다
+        self._allow_deep = False
 
     # -- 공개 API ----------------------------------------------------------
 
@@ -286,6 +321,8 @@ class SmartLocator:
         deadline = time.time() + max(timeout, 0.1)
         last_err = None
         relaxed = False
+        # 등록할 때 Shadow DOM 안에 있던 요소라면 처음부터 깊은 탐색을 허용한다
+        self._allow_deep = any(s.by == BY_DEEP for s in target.strategies)
 
         while True:
             try:
@@ -296,10 +333,12 @@ class SmartLocator:
                 last_err = e
 
             if time.time() >= deadline:
-                if visible_only and not relaxed:
-                    # 마지막 기회: '보이는 요소' 조건을 풀고 한 번 더 찾는다
+                if not relaxed:
+                    # 마지막 기회: '보이는 요소' 조건을 풀고,
+                    # Shadow DOM 안쪽까지 뒤지며 한 번 더 찾는다
                     relaxed = True
-                    deadline = time.time() + 2.0
+                    self._allow_deep = True
+                    deadline = time.time() + 2.5
                     continue
                 break
             if log:
@@ -467,8 +506,23 @@ class SmartLocator:
         return None
 
     def _find_by_strategy(self, st: Strategy) -> list:
+        if st.by == BY_DEEP:
+            return self._deep_find(st.value)
         try:
-            return self.driver.find_elements(st.by, st.value)
+            found = self.driver.find_elements(st.by, st.value)
+        except (WebDriverException, NoSuchElementException):
+            found = []
+        # 평범한 방법으로 못 찾았을 때만 Shadow DOM 안쪽을 뒤진다(느리기 때문)
+        if not found and self._allow_deep and st.by == By.CSS_SELECTOR:
+            found = self._deep_find(st.value)
+        return found
+
+    def _deep_find(self, css: str) -> list:
+        """Shadow DOM 경계를 넘어가며 CSS 선택자로 요소를 찾는다."""
+        try:
+            if not self.driver.execute_script(HAS_SHADOW_JS):
+                return []
+            return self.driver.execute_script(DEEP_QUERY_JS, css) or []
         except (WebDriverException, NoSuchElementException):
             return []
 

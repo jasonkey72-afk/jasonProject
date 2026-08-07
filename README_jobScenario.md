@@ -19,6 +19,7 @@
 | (추가) iframe 안에 숨은 요소 | 페이지의 **모든 프레임을 자동으로 순회**하며 탐색 (사내 그룹웨어에서 특히 자주 발생) |
 | (추가) 화면이 늦게 그려짐 | 지정한 대기 시간까지 반복 재시도 |
 | (추가) 클릭이 안 먹음 | 일반 클릭 → 스크롤 후 클릭 → JavaScript 클릭 순으로 자동 재시도 |
+| (추가) Shadow DOM | 최신 웹 컴포넌트 내부도 경계를 넘어 탐색 (요소 선택기도 안쪽 요소를 정확히 인식) |
 
 ## 2. 사용 방법 (부서원)
 
@@ -73,6 +74,7 @@
 | `id=userId` / `name=empNo` | HTML의 id / name 속성 |
 | `#loginBtn` / `div > input` | CSS 선택자 |
 | `//button[text()='확인']` | XPath |
+| `deep=#code` | Shadow DOM(최신 웹 컴포넌트) 안쪽까지 탐색 |
 | `조회` (표시 없이) | 글자·라벨·id·name 을 모두 시도 |
 
 ## 5. 실행파일(exe) 빌드 (담당자 1회 작업)
@@ -111,8 +113,8 @@ python jobscenario_main.py
 실제 브라우저를 띄워 동작을 확인합니다. 자세한 내용은 [tests/README.md](tests/README.md).
 
 ```bat
-python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 11건
-python tests\test_runner.py      :: 시나리오 실행 / 저장 21건
+python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 / Shadow DOM 14건
+python tests\test_runner.py      :: 시나리오 실행 / 저장 / 실패 기록 25건
 ```
 
 ### 폴더 구조
@@ -164,6 +166,7 @@ json_data = target.to_dict()                    # 파일로 저장해 두고 재
 | 시나리오 | `%LOCALAPPDATA%\jobScenario\scenarios\*.json` |
 | 브라우저 프로필(로그인 유지) | `%LOCALAPPDATA%\jobScenario\edge_profile` |
 | 내려받은 파일 | `%LOCALAPPDATA%\jobScenario\downloads` |
+| 실패 기록(화면·HTML) | `%LOCALAPPDATA%\jobScenario\failures` |
 
 ## 8. 문제 해결
 
@@ -174,4 +177,6 @@ json_data = target.to_dict()                    # 파일로 저장해 두고 재
 | 로그인 화면이 매번 나옴 | 시나리오의 **전용 프로필 사용**이 켜져 있는지 확인. 회사 정책상 매번 로그인해야 하는 사이트는 `사용자에게 값 입력받기` 단계로 처리 |
 | 클릭은 됐는데 다음 화면이 안 뜸 | 해당 단계의 **실행 후 쉬기**를 1~2초로 늘리거나, 다음 단계 앞에 `요소가 나타날 때까지 대기` 를 추가 |
 | 팝업 창으로 넘어가지 않음 | 새 창은 자동으로 따라가지만, 안 되면 `탭 전환`(값 `-1`) 단계를 추가 |
+| 실패 원인을 모르겠음 | 실패한 순간의 **화면·HTML이 자동 저장**됩니다. 실행 카드의 **[실패 기록 열기]** 로 확인하세요 |
+| 브라우저 버전이 올라가 드라이버가 안 맞음 | 실행 실패 시 **설치된 Edge 버전과 드라이버 버전을 비교해** 받아야 할 버전과 위치를 알려줍니다 |
 | 중간 단계만 다시 실행하고 싶음 | 해당 단계를 선택하고 **[▷ 선택 단계 실행]** — 브라우저 상태가 유지됩니다 |

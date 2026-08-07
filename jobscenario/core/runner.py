@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
+from pathlib import Path
 
 from ..webauto.driver import create_driver, quit_driver, data_dir
 from ..webauto.actions import WebActions
@@ -36,6 +38,7 @@ class Session:
         self.web = None
         self.variables = {}
         self.log = log or (lambda msg: None)
+        self.last_failure_dir = None      # 마지막으로 실패 기록을 남긴 폴더
 
     @property
     def browser_alive(self) -> bool:
@@ -57,9 +60,39 @@ class Session:
             browser=scenario.browser,
             profile=scenario.use_profile,
             download_dir=str(data_dir() / "downloads"),
+            log=self.log,
         )
         self.web = WebActions(self.driver, log=self.log)
         return self.web
+
+    def capture_failure(self, step_no: int, step_name: str) -> str:
+        """
+        실패한 순간의 화면과 HTML 을 남긴다.
+        "어제는 됐는데 오늘 안 된다" 를 나중에 확인할 수 있는 유일한 단서가 된다.
+        저장에 실패해도 원래 오류를 가리면 안 되므로 예외는 삼킨다.
+        """
+        if not self.browser_alive:
+            return ""
+        safe = re.sub(r'[\\/:*?"<>|]', "_", step_name or "단계")[:30]
+        folder = data_dir() / "failures" / ("%s_%d단계_%s"
+                                           % (time.strftime("%Y%m%d_%H%M%S"), step_no, safe))
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            self.driver.save_screenshot(str(folder / "화면.png"))
+            (folder / "화면.html").write_text(self.driver.page_source, encoding="utf-8")
+            (folder / "정보.txt").write_text(
+                "시각: %s\n단계: %d단계 %s\n주소: %s\n제목: %s\n"
+                % (time.strftime("%Y-%m-%d %H:%M:%S"), step_no, step_name,
+                   self.driver.current_url, self.driver.title),
+                encoding="utf-8")
+            self.last_failure_dir = folder
+            return str(folder)
+        except Exception:
+            return ""
 
     def close_browser(self):
         quit_driver(self.driver)
@@ -135,6 +168,9 @@ class Runner:
                 return True
             self.on_step(index, FAILED, msg)
             self.log("        ✕ %s" % msg)
+            saved = self.session.capture_failure(no, step.name)
+            if saved:
+                self.log("        · 실패한 화면을 저장했습니다: %s" % saved)
             return False
 
     # -- 단계 하나 실행 ----------------------------------------------------

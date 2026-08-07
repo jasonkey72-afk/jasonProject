@@ -22,10 +22,10 @@ from tkinter import ttk, messagebox, simpledialog, filedialog
 
 from . import theme as T
 from .step_dialog import StepDialog
-from ..core import storage
+from ..core import storage, programs
 from ..core.models import Scenario, Step, action_label
 from ..core.runner import Runner, Session, READY, RUNNING, DONE, FAILED, SKIPPED
-from ..webauto.driver import data_dir, BROWSERS
+from ..webauto.driver import data_dir, diagnose, BROWSERS
 
 APP_TITLE = "jobScenario - 반복 업무 자동화"
 SETTINGS = data_dir() / "settings.json"
@@ -197,6 +197,7 @@ class JobScenarioApp(tk.Tk):
         self.stop_btn.configure(state="disabled")
         self.progress = ttk.Progressbar(rf, mode="determinate", length=180)
         self.progress.pack(side="right")
+        T.Button(rf, "실패 기록 열기", self._open_failures).pack(side="right", padx=(0, 10))
 
         # --- 로그 ---
         logbox = T.section(main, "실행 기록")
@@ -530,12 +531,19 @@ class JobScenarioApp(tk.Tk):
         self._status("브라우저를 닫았습니다.")
 
     def _driver_help(self, e: Exception) -> str:
-        return ("브라우저를 실행하지 못했습니다.\n\n%s\n\n"
-                "확인해 주세요\n"
-                " · Edge(또는 Chrome)가 설치되어 있는지\n"
-                " · 사내망에서 드라이버 자동 내려받기가 막혀 있다면\n"
-                "   msedgedriver.exe 를 이 프로그램과 같은 폴더에 두세요.\n"
-                " · 브라우저 버전과 드라이버 버전이 같아야 합니다." % str(e)[:300])
+        """설치된 브라우저/드라이버 버전을 실제로 읽어 조치 방법까지 알려준다."""
+        return diagnose(self.browser_var.get(), e)
+
+    def _open_failures(self):
+        """마지막으로 실패한 화면이 저장된 폴더를 연다."""
+        folder = self.session.last_failure_dir or (data_dir() / "failures")
+        if not Path(folder).exists():
+            messagebox.showinfo("안내", "아직 저장된 실패 기록이 없습니다.", parent=self)
+            return
+        try:
+            programs.open_path(str(folder))
+        except Exception as e:
+            messagebox.showerror("열기 실패", str(e), parent=self)
 
     def _busy(self, running: bool):
         state = "disabled" if running else "normal"

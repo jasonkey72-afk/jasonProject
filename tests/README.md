@@ -1,11 +1,11 @@
 # 테스트
 
-실제 브라우저를 띄워 웹 자동화가 정말 동작하는지 확인합니다. (총 32건)
+실제 브라우저를 띄워 웹 자동화가 정말 동작하는지 확인합니다. (총 39건)
 
 ```bat
 pip install selenium
-python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 11건
-python tests\test_runner.py      :: 시나리오 실행 / 저장 21건
+python tests\test_webauto.py     :: 요소 탐색 / 요소 선택기 / Shadow DOM 14건
+python tests\test_runner.py      :: 시나리오 실행 / 저장 / 실패 기록 25건
 ```
 
 기본값은 사내 환경과 같은 **Edge** 입니다. 아래 환경변수로 바꿀 수 있습니다.
@@ -20,5 +20,6 @@ python tests\test_runner.py      :: 시나리오 실행 / 저장 21건
 `tests/pages/portal.html` 이 사내 포털을 흉내 낸 시험용 화면입니다.
 표 안의 입력창, 글자만 있는 버튼, iframe 안의 결재 화면처럼
 **실제로 자동화가 자주 실패하는 구조**를 일부러 담아 두었습니다.
+Shadow DOM 을 쓰는 웹 컴포넌트(`<my-widget>`)도 포함되어 있습니다.
 
 새 기능을 추가하면 이 두 파일에 검증을 함께 넣어 주세요.

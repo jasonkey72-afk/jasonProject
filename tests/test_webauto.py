@@ -120,6 +120,39 @@ try:
         raise AssertionError("오류가 발생해야 하는데 성공했습니다")
 
     r.check("없는 요소 -> 친절한 오류", not_found)
+
+    # --- Shadow DOM (최신 웹 컴포넌트) ---
+    def shadow_pick():
+        """Shadow DOM 안을 클릭하면 껍데기가 아니라 진짜 요소를 잡아야 한다."""
+        driver.switch_to.default_content()
+        driver.execute_script(picker.PICKER_JS)
+        driver.execute_script(
+            "var b = document.querySelector('my-widget').shadowRoot"
+            ".getElementById('deepBtn');"
+            "b.dispatchEvent(new MouseEvent('click',{bubbles:true,composed:true}));")
+        info = json.loads(driver.execute_script(picker.READ_JS))
+        assert_eq(info["tag"], "button")            # my-widget 이 아니라 button
+        assert_eq(info["id"], "deepBtn")
+        assert info.get("shadow"), "Shadow DOM 경로가 수집되지 않았습니다"
+        picked["shadow"] = picker.build_target(info, [])
+
+    r.check("Shadow DOM 안 요소 선택", shadow_pick)
+
+    r.check("Shadow DOM 안 요소 클릭", lambda: (
+        driver.switch_to.default_content(),
+        web.click(picked["shadow"]),
+        assert_eq(driver.execute_script(
+            "return document.querySelector('my-widget').shadowRoot"
+            ".getElementById('deepSt').textContent;"), "내부확인됨"),
+    ))
+
+    r.check("Shadow DOM 안 입력창에 입력", lambda: (
+        driver.switch_to.default_content(),
+        web.input_text("deep=#code", "A-1234"),
+        assert_eq(driver.execute_script(
+            "return document.querySelector('my-widget').shadowRoot"
+            ".getElementById('code').value;"), "A-1234"),
+    ))
 finally:
     try:
         driver.quit()

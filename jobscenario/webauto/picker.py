@@ -19,7 +19,7 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import WebDriverException
 
 from .locator import (
-    Strategy, Target, STRATEGY_SCORE, _is_stable_key,
+    Strategy, Target, STRATEGY_SCORE, BY_DEEP, _is_stable_key,
     strategies_for_text, strategies_for_label,
 )
 
@@ -125,8 +125,43 @@ PICKER_JS = r"""
     return out;
   }
 
+  // Shadow DOM 안을 클릭하면 e.target 이 바깥 껍데기(host)로 바뀌어 온다.
+  // composedPath()[0] 이 사용자가 실제로 클릭한 요소다.
+  function real(e) {
+    var path = e.composedPath ? e.composedPath() : null;
+    return (path && path.length) ? path[0] : e.target;
+  }
+
+  // 요소가 Shadow DOM 안에 있으면, 그 안에서의 CSS 경로를 따로 만들어 둔다
+  function shadowInfo(el) {
+    var root = el.getRootNode ? el.getRootNode() : null;
+    if (!root || root.nodeType !== 11) { return null; }
+    var parts = [], cur = el, guard = 0;
+    while (cur && cur.nodeType === 1 && guard++ < 12) {
+      if (cur.id && /^[A-Za-z][\w\-]*$/.test(cur.id)) {
+        parts.unshift('#' + cur.id);
+        break;
+      }
+      var name = cur.nodeName.toLowerCase(), parent = cur.parentNode, idx = 1, n = 0;
+      if (parent && parent.children) {
+        for (var i = 0; i < parent.children.length; i++) {
+          if (parent.children[i].nodeName === cur.nodeName) {
+            n++;
+            if (parent.children[i] === cur) { idx = n; }
+          }
+        }
+        if (n > 1) { name += ':nth-of-type(' + idx + ')'; }
+      }
+      parts.unshift(name);
+      cur = parent;
+      if (!cur || cur.nodeType === 11) { break; }
+    }
+    return parts.join(' > ');
+  }
+
   function describe(el) {
     return {
+      shadow: shadowInfo(el),
       tag: el.nodeName.toLowerCase(),
       id: el.id || '',
       name: el.getAttribute('name') || '',
@@ -148,7 +183,7 @@ PICKER_JS = r"""
   }
 
   function move(e) {
-    var el = e.target;
+    var el = real(e);
     if (!el || el === box || el === tip || el === bar) { return; }
     var r = el.getBoundingClientRect();
     box.style.display = 'block';
@@ -173,7 +208,7 @@ PICKER_JS = r"""
 
   function hit(e) {
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    try { window.__JS_PICK__ = JSON.stringify(describe(e.target)); }
+    try { window.__JS_PICK__ = JSON.stringify(describe(real(e))); }
     catch (err) { window.__JS_PICK__ = JSON.stringify({ error: String(err) }); }
     stop();
     return false;
@@ -293,6 +328,14 @@ def build_target(info: dict, frames: list) -> Target:
     # 입력창은 라벨 글자로도 찾을 수 있게 해 둔다
     if tag in ("input", "select", "textarea") and info.get("label"):
         strategies.extend(strategies_for_label(info["label"].strip()))
+
+    # Shadow DOM 안의 요소는 평범한 CSS/XPath 로는 아예 보이지 않으므로
+    # 경계를 넘어가며 찾는 전용 전략을 함께 넣어 둔다
+    shadow = info.get("shadow")
+    if shadow:
+        add("deep", BY_DEEP, shadow)
+        if _is_stable_key(info.get("id", "")):
+            add("deep", BY_DEEP, "#%s" % info["id"], 2)
 
     # id 가 섞이지 않은 경로형 선택자는 다른 화면에도 우연히 맞을 수 있어 뒤로 미룬다
     css = info.get("css", "")

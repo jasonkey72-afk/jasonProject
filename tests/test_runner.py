@@ -103,6 +103,16 @@ try:
     r.expect("실패 시 뒤 단계까지 중단",
              r2.run_all(0) is False and 1 not in bad_states, bad_states)
 
+    # --- 실패한 순간의 화면이 자동으로 남는가 ---
+    saved = session.last_failure_dir
+    r.expect("실패 기록 폴더 생성", saved is not None and Path(saved).is_dir(), saved)
+    if saved:
+        names = sorted(p.name for p in Path(saved).iterdir())
+        r.expect("화면 캡처 저장", "화면.png" in names, names)
+        r.expect("HTML 저장", "화면.html" in names, names)
+        r.expect("정보 파일에 주소·단계 기록",
+                 "없는 버튼" in (Path(saved) / "정보.txt").read_text(encoding="utf-8"))
+
     # --- 저장 / 불러오기 ---
     tmp = Path(tempfile.mkdtemp()) / "scn.json"
     path = storage.save(scenario, tmp)
