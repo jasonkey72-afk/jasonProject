@@ -1,2 +1,8 @@
+# Excel → PDF 변환기용
 pywin32>=306
+
+# MP4 → GIF 변환기용 (ffmpeg 실행파일이 함께 설치됩니다)
+imageio-ffmpeg>=0.4.9
+
+# 공통: exe 빌드용
 pyinstaller>=6.0
