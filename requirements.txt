@@ -1,2 +1,4 @@
 pywin32>=306
 pyinstaller>=6.0
+selenium>=4.16.0
+websocket-client>=1.6.0
