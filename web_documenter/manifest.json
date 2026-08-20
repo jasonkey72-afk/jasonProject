@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "웹 본문 문서화 도구",
+  "version": "1.0.0",
+  "description": "웹 페이지 본문 전체를 스크롤 없이 한 번에 수집해 문서(Markdown/Word/HTML/텍스트)로 저장합니다. 일괄/건별 저장 지원.",
+  "permissions": [
+    "storage",
+    "downloads",
+    "scripting",
+    "tabs",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "웹 본문 문서화",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "capture-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "현재 페이지 본문 담기 / 저장"
+    }
+  }
+}

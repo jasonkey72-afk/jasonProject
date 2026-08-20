@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div class="head-title">웹 본문 문서화</div>
+    <div class="head-count" id="count">0건</div>
+  </header>
+
+  <section class="card">
+    <div class="page-title" id="pageTitle">-</div>
+    <div class="page-url" id="pageUrl"></div>
+    <button class="primary" id="captureBtn">이 페이지 담기</button>
+    <div class="hint" id="captureHint">본문 전체를 한 번에 읽어옵니다. (단축키 Alt+Shift+S)</div>
+  </section>
+
+  <section class="card">
+    <div class="label">저장 방식</div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="batch">일괄 저장</button>
+      <button data-mode="single">건 별 저장</button>
+    </div>
+    <div class="hint" id="modeHint"></div>
+
+    <div class="row">
+      <div class="label">문서 형식</div>
+      <select id="format">
+        <option value="md">Markdown (.md)</option>
+        <option value="doc">Word 문서 (.doc)</option>
+        <option value="html">웹 문서 (.html)</option>
+        <option value="txt">텍스트 (.txt)</option>
+      </select>
+    </div>
+
+    <label class="check"><input type="checkbox" id="autoCapture"> 페이지를 열 때마다 자동 수집</label>
+    <label class="check"><input type="checkbox" id="autoScroll"> 저장 전 페이지 끝까지 자동 스크롤</label>
+    <label class="check"><input type="checkbox" id="skipDuplicates"> 같은 주소는 중복 수집 안 함</label>
+  </section>
+
+  <section class="card" id="listCard">
+    <div class="label">수집 목록</div>
+    <ul class="list" id="list"></ul>
+    <div class="empty" id="empty">아직 담은 페이지가 없습니다.</div>
+    <div class="btn-row">
+      <button class="primary" id="exportMerged">하나로 합쳐 저장</button>
+      <button id="exportSeparate">건별 파일로 저장</button>
+    </div>
+    <button class="ghost" id="clearBtn">목록 비우기</button>
+  </section>
+
+  <div class="status" id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,3 +1,12 @@
+# 업무 자동화 도구 모음
+
+| 도구 | 하는 일 | 위치 |
+|---|---|---|
+| **Excel → PDF 변환기** | Excel 파일을 서식 그대로 PDF로 일괄 변환 (Windows 프로그램) | 이 문서 아래 |
+| **웹 본문 문서화 도구** | 웹 페이지 본문 전체를 스크롤 없이 문서로 저장, 일괄/건별 선택 (Chrome·Edge 확장) | [`web_documenter/`](web_documenter/README.md) |
+
+---
+
 # Excel → PDF 변환기
 
 사내 LLM 적재 등 "PDF 파일만 허용"되는 업무 환경을 위해, Excel 파일(xlsx/xlsm/xls)을

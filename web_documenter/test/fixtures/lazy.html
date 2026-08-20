@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>무한 스크롤 문서</title></head>
+<body>
+<article id="doc"><h1>지연 로딩 테스트 문서</h1><p>스크롤을 내려야 다음 문단이 붙는 페이지입니다.</p></article>
+<script>
+let n = 0;
+window.addEventListener('scroll', () => {
+  if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 5 && n < 5) {
+    n++;
+    const p = document.createElement('p');
+    p.textContent = '스크롤로 추가된 ' + n + '번째 문단입니다. 이 문장이 문서에 포함되어야 자동 스크롤이 제대로 동작한 것입니다. 충분한 길이를 위해 문장을 조금 더 이어 붙입니다.';
+    document.getElementById('doc').appendChild(p);
+    const spacer = document.createElement('div');
+    spacer.style.height = '600px';
+    document.getElementById('doc').appendChild(spacer);
+  }
+});
+const spacer = document.createElement('div');
+spacer.style.height = '900px';
+document.getElementById('doc').appendChild(spacer);
+</script>
+</body>
+</html>
