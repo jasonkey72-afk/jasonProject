@@ -13,6 +13,8 @@
 
   const MAX_SCROLL_MS = 15000;   // 자동 스크롤 최대 시간
   const HIDDEN_MARK = 'data-wd-hidden';
+  const IMG_SRC = 'data-wd-src';
+  const IMG_DROP = 'data-wd-drop';
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg.type !== 'string') return;
@@ -57,7 +59,8 @@
       markdown,
       html,
       text,
-      charCount: text.length
+      charCount: text.length,
+      images: collectImages(root)   // 문서에 넣을 그림 주소 (중복 제거)
     };
   }
 
@@ -129,6 +132,40 @@
     document.body.querySelectorAll('[' + HIDDEN_MARK + ']').forEach((el) => el.removeAttribute(HIDDEN_MARK));
   }
 
+  // 본문에 넣을 만한 그림인지 원본 DOM 에서 판단해 표시해 둔다.
+  // (복제본에서는 naturalWidth 를 알 수 없고, lazy-loading 으로 src 가 비어 있을 수 있다)
+  const MIN_IMAGE_PX = 40;
+
+  function markImages() {
+    for (const img of Array.from(document.images)) {
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      // 아이콘·버튼·추적용 1x1 픽셀은 문서에 넣지 않는다.
+      if ((w && h && w < MIN_IMAGE_PX && h < MIN_IMAGE_PX) || (w === 1 && h === 1)) {
+        img.setAttribute(IMG_DROP, '1');
+        continue;
+      }
+      const src = img.currentSrc || img.src; // srcset·lazy-loading 이 적용된 실제 주소
+      if (src) img.setAttribute(IMG_SRC, src);
+    }
+  }
+
+  function unmarkImages() {
+    document.querySelectorAll('[' + IMG_SRC + '],[' + IMG_DROP + ']').forEach((el) => {
+      el.removeAttribute(IMG_SRC);
+      el.removeAttribute(IMG_DROP);
+    });
+  }
+
+  function collectImages(root) {
+    const seen = new Set();
+    root.querySelectorAll('img[src]').forEach((img) => {
+      const src = img.getAttribute('src');
+      if (src && /^https?:/i.test(src)) seen.add(src);
+    });
+    return Array.from(seen);
+  }
+
   const DROP_TAGS = [
     'script', 'style', 'noscript', 'iframe', 'svg', 'canvas', 'template',
     'link', 'meta', 'button', 'input', 'select', 'textarea', 'video',
@@ -161,8 +198,10 @@
 
   function buildCleanRoot() {
     markHiddenNodes();
+    markImages();
     const clone = document.body.cloneNode(true);
     unmarkHiddenNodes();
+    unmarkImages();
 
     stripNoise(clone);
     const best = pickBestBlock(clone);
@@ -173,6 +212,7 @@
   function stripNoise(clone) {
     clone.querySelectorAll(DROP_TAGS).forEach(remove);
     clone.querySelectorAll('[' + HIDDEN_MARK + ']').forEach(remove);
+    clone.querySelectorAll('img[' + IMG_DROP + ']').forEach(remove);
     clone.querySelectorAll(DROP_ROLES).forEach(remove);
 
     const total = textLen(clone) || 1;
@@ -250,6 +290,10 @@
   function cleanAttributes(root) {
     const walk = (el) => {
       if (el.nodeType !== 1) return;
+      if (el.tagName === 'IMG') {
+        const real = el.getAttribute(IMG_SRC);
+        if (real) el.setAttribute('src', real);
+      }
       for (const attr of Array.from(el.attributes || [])) {
         if (!KEEP_ATTRS.has(attr.name)) {
           el.removeAttribute(attr.name);

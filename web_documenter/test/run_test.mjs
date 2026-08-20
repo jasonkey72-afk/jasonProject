@@ -19,11 +19,12 @@ const SITE = path.join(HERE, 'fixtures');
 const OUT = path.join(HERE, 'out');
 const EXT = path.dirname(HERE);
 
+const MIME = { '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml' };
 const server = http.createServer((req, res) => {
   const file = path.join(SITE, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'board.html');
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('nope'); return; }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
     res.end(data);
   });
 });
@@ -39,6 +40,9 @@ const ctx = await chromium.launchPersistentContext(userDir, {
   downloadsPath: downloadDir,
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
 });
+
+// 인쇄 대화상자는 자동 검증이 불가능하므로 호출만 가로채 기록한다.
+await ctx.addInitScript(() => { window.print = () => { window.__wdPrinted = (window.__wdPrinted || 0) + 1; }; });
 
 // service worker 준비 대기
 let sw = ctx.serviceWorkers()[0];
@@ -65,7 +69,7 @@ const call = (type, extra = {}) => swCall(
   }, { type, extra });
 const capture = () => call('CAPTURE_CURRENT');
 
-await call('SET_SETTINGS', { patch: { mode: 'batch', autoScroll: false, autoCapture: false, format: 'md' } });
+await call('SET_SETTINGS', { patch: { mode: 'batch', autoScroll: false, autoCapture: false, format: 'md', includeImages: false } });
 
 const res1 = await capture();
 check('게시판 수집 성공', res1 && res1.ok === true, JSON.stringify(res1).slice(0, 200));
@@ -211,6 +215,121 @@ await popup.click('#list li:first-child .it-del');
 await popup.waitForTimeout(600);
 const p3 = await popup.evaluate(() => document.querySelectorAll('#list li').length);
 check('팝업에서 개별 삭제', p3 === 1 && (await call('GET_STATE')).items.length === 1, `items=${p3}`);
+await popup.close(); // 이후 검증은 일반 웹페이지 탭에서 진행한다
+
+// ---------------------------------------------------------------- 9. 본문 그림 포함
+await call('CLEAR_ITEMS');
+await call('SET_SETTINGS', { patch: { autoCapture: false, includeImages: false, skipDuplicates: false, format: 'md' } });
+await page.bringToFront();
+await page.goto(`${base}/board.html`);
+await page.waitForLoadState('networkidle');
+
+// (1) 그림 포함 끔 → 원본 주소 유지
+await capture();
+let stored = (await swCall(() => chrome.storage.local.get('items'))).items || [];
+if (!stored.length) { console.log('  (수집 실패)', JSON.stringify(await capture())); }
+const noImg = stored[stored.length - 1] || { markdown: '', html: '', text: '' };
+check('그림 포함 끔 - 원본 주소 유지',
+  noImg.markdown.includes(`![ERP 전표입력 화면](${base}/photo.png)`) && !noImg.html.includes('data:image'),
+  `data URI 없음=${!noImg.html.includes('data:image')}`);
+
+// (2) 그림 포함 켬 → 문서 안에 그림 데이터가 들어감
+await call('SET_SETTINGS', { patch: { includeImages: true } });
+await capture();
+stored = (await swCall(() => chrome.storage.local.get('items'))).items;
+const withImg = stored[stored.length - 1];
+const dataUris = (withImg.html.match(/data:image\/[a-z+]+;base64,/g) || []);
+check('그림 포함 켬 - 문서에 그림 데이터 포함', dataUris.length === 1 && withImg.imageCount === 1,
+  `data URI ${dataUris.length}개, imageCount=${withImg.imageCount}`);
+check('큰 그림은 줄여서 압축', dataUris[0] === 'data:image/jpeg;base64,', dataUris[0]);
+check('아이콘·추적픽셀 제외', !withImg.markdown.includes('작은 아이콘') && !withImg.markdown.includes('pixel.png'));
+check('markdown 에도 그림 포함', withImg.markdown.includes('![ERP 전표입력 화면](data:image/jpeg;base64,'));
+check('그림 설명(figcaption) 유지', withImg.markdown.includes('[그림 1] ERP 전표입력 화면'));
+check('txt 는 그림 데이터 없이 설명만', !withImg.text.includes('data:image') && withImg.text.includes('[ERP 전표입력 화면]'),
+  withImg.text.slice(0, 60).replace(/\n/g, ' '));
+
+const withImgSize = withImg.html.length;
+check('그림 크기 조절됨(원본 809KB → 문서 내 500KB 미만)', withImgSize < 500 * 1024,
+  `${Math.round(withImgSize / 1024)}KB`);
+
+// 그림이 포함된 HTML 문서 저장
+await call('SET_SETTINGS', { patch: { format: 'html' } });
+const sinceImg = await lastDownloadId();
+const expImg = await call('EXPORT', { style: 'merged' });
+const dlImg = await waitDownloads(sinceImg);
+const bodyImg = dlImg.length ? fs.readFileSync(dlImg[0].filename, 'utf8') : '';
+fs.writeFileSync(path.join(OUT, 'sample_with_image.html'), bodyImg);
+check('그림 포함 HTML 저장', expImg.ok && bodyImg.includes('<img src="data:image/jpeg;base64,'),
+  `${Math.round(bodyImg.length / 1024)}KB`);
+
+// ---------------------------------------------------------------- 10. PDF (인쇄 창으로 저장)
+await call('CLEAR_ITEMS');
+await call('SET_SETTINGS', { patch: { format: 'pdf', mode: 'batch', includeImages: true } });
+await page.goto(`${base}/board.html`);
+await page.waitForLoadState('networkidle');
+await capture();
+await page.goto(`${base}/lazy.html`);
+await page.waitForLoadState('networkidle');
+await capture();
+
+const before = ctx.pages().length;
+const expPdf = await call('EXPORT', { style: 'merged' });
+await new Promise((r) => setTimeout(r, 2500));
+const printPages = ctx.pages().filter((p) => p.url().includes('print.html'));
+check('PDF - 인쇄 탭 열림', expPdf.ok && expPdf.printing === true && printPages.length === 1,
+  `${expPdf.filename} / 탭 ${ctx.pages().length - before}개`);
+
+const printPage = printPages[0];
+await printPage.waitForLoadState('networkidle');
+await printPage.waitForTimeout(1200);
+const pdfInfo = await printPage.evaluate(() => ({
+  title: document.title,
+  printed: window.__wdPrinted || 0,
+  images: document.images.length,
+  loaded: Array.from(document.images).every((i) => i.complete && i.naturalWidth > 0),
+  tables: document.querySelectorAll('table').length,
+  sections: document.querySelectorAll('section').length,
+  toc: !!document.querySelector('.wd-toc'),
+  pageBreak: getComputedStyle(document.querySelectorAll('section')[1]).pageBreakBefore,
+  barHidden: getComputedStyle(document.getElementById('wd-bar')).display
+}));
+check('PDF - 파일 이름이 문서 제목으로 지정됨', /^모음_\d{8}_\d{6}_2건$/.test(pdfInfo.title), pdfInfo.title);
+check('PDF - 인쇄 창 자동 호출', pdfInfo.printed === 1, `print() ${pdfInfo.printed}회`);
+check('PDF - 그림이 모두 로드된 뒤 인쇄', pdfInfo.images === 1 && pdfInfo.loaded, JSON.stringify(pdfInfo.images));
+check('PDF - 목차/문서별 쪽 나눔', pdfInfo.toc && pdfInfo.sections === 2 && pdfInfo.pageBreak === 'always', pdfInfo.pageBreak);
+check('PDF - 표 유지', pdfInfo.tables === 1);
+check('PDF - 안내 막대는 화면에만 표시', pdfInfo.barHidden !== 'none');
+await printPage.screenshot({ path: path.join(OUT, 'print_preview.png'), fullPage: true });
+await printPage.close();
+
+// 저장된 인쇄 데이터는 한 번 쓰고 지워진다
+const leftover = await swCall(async () => Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith('print_')).length);
+check('PDF - 임시 데이터 정리', leftover === 0, `남은 항목 ${leftover}개`);
+
+// 건별 PDF: 문서 수만큼 탭이 열리고, 보이는 탭만 인쇄된다
+const beforeSep = ctx.pages().length;
+const expPdfSep = await call('EXPORT', { style: 'separate' });
+await new Promise((r) => setTimeout(r, 2500));
+const sepPages = ctx.pages().filter((p) => p.url().includes('print.html'));
+check('PDF - 건별 저장은 문서마다 탭', expPdfSep.printing && sepPages.length === 2,
+  `탭 ${ctx.pages().length - beforeSep}개`);
+const printedCounts = await Promise.all(sepPages.map((p) => p.evaluate(() => window.__wdPrinted || 0)));
+check('PDF - 첫 탭만 인쇄 창 호출(나머지는 탭을 볼 때)', printedCounts.filter((n) => n > 0).length === 1,
+  printedCounts.join(', '));
+for (const p of sepPages) await p.close();
+
+// ---------------------------------------------------------------- 11. 자동 수집 중에는 인쇄 창을 띄우지 않음
+await call('CLEAR_ITEMS');
+await call('SET_SETTINGS', { patch: { mode: 'single', format: 'pdf', autoCapture: true, skipDuplicates: false, includeImages: false } });
+const page3 = await ctx.newPage();
+await page3.goto(`${base}/board.html`);
+await new Promise((r) => setTimeout(r, 4000));
+const autoPdf = await call('GET_STATE');
+const autoPrintTabs = ctx.pages().filter((p) => p.url().includes('print.html')).length;
+check('자동 수집 + PDF - 인쇄 창 대신 목록에 담김', autoPdf.items.length === 1 && autoPrintTabs === 0,
+  `목록 ${autoPdf.items.length}건 / 인쇄탭 ${autoPrintTabs}개`);
+await page3.close();
+await call('SET_SETTINGS', { patch: { autoCapture: false, mode: 'batch', format: 'md' } });
 
 // ---------------------------------------------------------------- 마무리
 await ctx.close();

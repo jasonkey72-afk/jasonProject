@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   autoCapture: false,     // 페이지를 열 때마다 자동 수집
   autoScroll: true,       // 저장 전 페이지 끝까지 자동 스크롤(지연 로딩 대응)
   skipDuplicates: true,   // 같은 URL 중복 수집 방지
+  includeImages: true,    // 본문 그림을 문서 안에 넣기
   folder: '웹문서화'
 };
 
@@ -17,10 +18,13 @@ const ASCII_FOLDER = 'WebDocs';
 
 const FORMATS = {
   md: { ext: 'md', mime: 'text/markdown' },
-  txt: { ext: 'txt', mime: 'text/plain' },
+  pdf: { ext: 'pdf', mime: 'application/pdf', print: true }, // 브라우저 인쇄 기능으로 저장
   doc: { ext: 'doc', mime: 'application/msword' },
-  html: { ext: 'html', mime: 'text/html' }
+  html: { ext: 'html', mime: 'text/html' },
+  txt: { ext: 'txt', mime: 'text/plain' }
 };
+
+const isPrintFormat = (format) => !!(FORMATS[format] || {}).print;
 
 /* ---------------------------------------------------------------- */
 /* 저장소                                                            */
@@ -81,7 +85,7 @@ async function toast(tabId, text, tone) {
  * 탭 하나를 수집한다. (설정에 따라 목록에 담거나 즉시 저장)
  * @returns {Promise<{status:'saved'|'queued'|'duplicate', title?:string, count?:number, filename?:string}>}
  */
-async function captureTab(tabId) {
+async function captureTab(tabId, opts = {}) {
   const tab = await chrome.tabs.get(tabId);
   if (!isCapturable(tab.url)) {
     throw new Error('이 페이지는 수집할 수 없습니다. (일반 웹페이지에서 사용해 주세요)');
@@ -107,17 +111,126 @@ async function captureTab(tabId) {
 
   const item = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...res.doc };
 
-  if (settings.mode === 'single') {
+  if (settings.includeImages) {
+    await toast(tabId, '본문 그림을 가져오는 중입니다...');
+    item.imageCount = await embedImages(item);
+  }
+  delete item.images; // 주소 목록은 문서에 넣은 뒤로는 필요 없다
+
+  const withImages = item.imageCount ? ` · 그림 ${item.imageCount}장` : '';
+
+  // PDF 는 인쇄 대화상자를 띄우므로, 자동 수집 중에는 저장 대신 목록에 담는다.
+  const printNow = isPrintFormat(settings.format) && !opts.auto;
+
+  if (settings.mode === 'single' && printNow) {
+    const filename = await openPrintTab([item], settings, '');
+    await toast(tabId, `인쇄 창에서 "PDF로 저장"을 선택하세요 · ${filename}`);
+    return { status: 'printing', title: item.title, filename };
+  }
+
+  if (settings.mode === 'single' && !isPrintFormat(settings.format)) {
     const filename = await saveOne(item, settings);
-    await toast(tabId, `저장 완료 · ${filename}`);
+    await toast(tabId, `저장 완료 · ${filename}${withImages}`);
     return { status: 'saved', title: item.title, filename };
   }
 
   const items = await getItems();
   items.push(item);
   await setItems(items);
-  await toast(tabId, `담기 완료 (${items.length}건) · ${item.charCount.toLocaleString()}자`);
+  await toast(tabId, `담기 완료 (${items.length}건) · ${item.charCount.toLocaleString()}자${withImages}`);
   return { status: 'queued', title: item.title, count: items.length };
+}
+
+/* ---------------------------------------------------------------- */
+/* 본문 그림 가져오기 (문서에 그대로 넣기 위해 데이터로 변환)         */
+/* ---------------------------------------------------------------- */
+
+const IMG_MAX_WIDTH = 1400;              // 이 폭을 넘으면 줄여서 넣는다
+const IMG_RECODE_OVER = 400 * 1024;      // 이보다 크면 다시 압축을 시도
+const IMG_SRC_LIMIT = 8 * 1024 * 1024;   // 원본이 이보다 크면 건너뜀
+const IMG_DOC_BUDGET = 25 * 1024 * 1024; // 문서 하나에 넣을 그림 총량
+const IMG_CONCURRENCY = 4;
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+async function blobToDataUrl(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return `data:${blob.type || 'image/png'};base64,${bytesToBase64(bytes)}`;
+}
+
+/** 그림 하나를 내려받아 data URL 로 만든다. 너무 크면 줄여서 다시 압축한다. */
+async function imageToDataUrl(url) {
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const blob = await res.blob();
+  if (!blob.size || blob.size > IMG_SRC_LIMIT) throw new Error('크기 초과');
+
+  const type = blob.type || '';
+  // 벡터(SVG)·움직이는 그림(GIF)은 다시 그리면 망가지므로 원본 그대로 넣는다.
+  if (/svg|gif/i.test(type)) return blobToDataUrl(blob);
+
+  if (blob.size > IMG_RECODE_OVER) {
+    try {
+      const bitmap = await createImageBitmap(blob);
+      const scale = Math.min(1, IMG_MAX_WIDTH / bitmap.width);
+      const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; // 투명 배경이 검게 나오지 않도록
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
+      if (jpeg.size < blob.size) return blobToDataUrl(jpeg);
+    } catch (_) {
+      // 디코딩 실패 시 원본 사용
+    }
+  }
+  return blobToDataUrl(blob);
+}
+
+/**
+ * 수집한 문서의 그림을 실제 이미지 데이터로 바꿔 넣는다.
+ * 실패한 그림은 원래 주소를 그대로 두므로 문서가 깨지지 않는다.
+ * @returns {Promise<number>} 문서에 넣은 그림 수
+ */
+async function embedImages(doc) {
+  const urls = Array.isArray(doc.images) ? doc.images : [];
+  if (!urls.length) return 0;
+
+  const replacements = [];
+  let used = 0;
+  let next = 0;
+
+  async function worker() {
+    while (next < urls.length) {
+      const url = urls[next++];
+      if (used >= IMG_DOC_BUDGET) return;
+      try {
+        const dataUrl = await imageToDataUrl(url);
+        used += dataUrl.length;
+        replacements.push([url, dataUrl]);
+      } catch (err) {
+        console.warn('[웹 본문 문서화] 그림을 가져오지 못했습니다:', url, String(err));
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(IMG_CONCURRENCY, urls.length) }, worker));
+
+  for (const [url, dataUrl] of replacements) {
+    // HTML 속성에서는 & 가 &amp; 로 바뀌어 있으므로 두 형태 모두 치환한다.
+    doc.html = doc.html.split(url).join(dataUrl).split(url.replace(/&/g, '&amp;')).join(dataUrl);
+    doc.markdown = doc.markdown.split(url).join(dataUrl);
+  }
+  return replacements.length;
 }
 
 /* ---------------------------------------------------------------- */
@@ -293,6 +406,54 @@ function buildContent(items, format, mergedTitle) {
   return htmlDocument(mergedTitle, sections, toc, forWord);
 }
 
+// 인쇄(PDF 저장)용 추가 서식
+const PRINT_STYLE = `
+@page { margin: 15mm 14mm; }
+@media print { body { margin: 0; } }
+h1, h2, h3 { page-break-after: avoid; }
+table, figure, pre, blockquote { page-break-inside: avoid; }
+img { max-width: 100%; height: auto; page-break-inside: avoid; }
+section + section { page-break-before: always; }
+.wd-toc { page-break-after: always; }
+a { color: #1b4fa8; text-decoration: none; }
+`;
+
+/** 인쇄 페이지에 넘길 문서 조각을 만든다. */
+function buildPrintDoc(items, mergedTitle) {
+  const merged = items.length > 1 || !!mergedTitle;
+  const sections = items.map(itemHtmlSection);
+  const toc = merged ? [
+    '<div class="wd-toc"><b>목차</b><ol>',
+    items.map((it, i) => `<li><a href="#doc${i}">${escapeHtml(it.title)}</a></li>`).join(''),
+    `</ol><div style="font-size:9pt;color:#555">총 ${items.length}건 · 저장 시각 ${humanTime(new Date().toISOString())}</div></div>`
+  ].join('') : '';
+
+  return { style: HTML_STYLE + PRINT_STYLE, body: toc + sections.join('\n') };
+}
+
+/**
+ * 인쇄 탭을 연다. 사용자가 인쇄 대화상자에서 "PDF로 저장"을 고르면 PDF 가 만들어진다.
+ * (확장에서 직접 PDF 를 만들려면 한글 글꼴을 통째로 넣어야 해 파일이 매우 커지고,
+ *  브라우저 인쇄 기능을 쓰면 글꼴·표·그림이 화면과 똑같이 나온다)
+ * @param {boolean} background true 면 탭을 열어 두기만 하고, 화면에 보일 때 인쇄한다
+ * @returns {Promise<string>} 저장될 파일 이름
+ */
+async function openPrintTab(items, settings, mergedTitle, background) {
+  const name = mergedTitle
+    ? `모음_${stamp()}_${items.length}건`
+    : `${stamp()}_${safeName(items[0].title)}`;
+
+  const key = `print_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await chrome.storage.local.set({
+    [key]: { title: name, autoPrint: !background, ...buildPrintDoc(items, mergedTitle) }
+  });
+  await chrome.tabs.create({
+    url: chrome.runtime.getURL(`print.html?k=${encodeURIComponent(key)}`),
+    active: !background
+  });
+  return `${name}.pdf`;
+}
+
 function utf8ToBase64(str) {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -342,6 +503,7 @@ function itemName(item, settings, prefix) {
 }
 
 async function saveOne(item, settings) {
+  if (isPrintFormat(settings.format)) return openPrintTab([item], settings, '');
   const fmt = FORMATS[settings.format] || FORMATS.md;
   return download(itemName(item, settings), buildContent([item], settings.format, ''), fmt.mime);
 }
@@ -354,6 +516,19 @@ async function exportAll(style) {
 
   const fmt = FORMATS[settings.format] || FORMATS.md;
   const time = stamp();
+
+  // PDF: 브라우저 인쇄 기능으로 저장한다.
+  if (isPrintFormat(settings.format)) {
+    if (style === 'separate') {
+      // 문서마다 인쇄 창이 필요하므로, 탭을 순서대로 열어 두고 보이는 탭부터 인쇄한다.
+      for (let i = 0; i < items.length; i++) {
+        await openPrintTab([items[i]], settings, '', i > 0);
+      }
+      return { count: items.length, filename: `PDF 인쇄 탭 ${items.length}개`, printing: true };
+    }
+    const filename = await openPrintTab(items, settings, `수집 문서 모음 (${items.length}건)`);
+    return { count: items.length, filename, printing: true };
+  }
 
   if (style === 'separate') {
     let saved = '';
@@ -397,7 +572,7 @@ function scheduleAutoCapture(tabId, url, delay) {
       if (!isCapturable(tab.url) || tab.url !== url) return;
       if (lastAutoUrl.get(tabId) === tab.url) return;
       lastAutoUrl.set(tabId, tab.url);
-      await captureTab(tabId);
+      await captureTab(tabId, { auto: true });
     } catch (err) {
       console.warn('[웹 본문 문서화] 자동 수집 실패:', err);
     }
@@ -430,7 +605,7 @@ const HANDLERS = {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return {
       settings,
-      items: items.map(({ id, title, url, charCount, capturedAt }) => ({ id, title, url, charCount, capturedAt })),
+      items: items.map(({ id, title, url, charCount, imageCount, capturedAt }) => ({ id, title, url, charCount, imageCount, capturedAt })),
       tab: tab ? { id: tab.id, title: tab.title, url: tab.url, capturable: isCapturable(tab.url) } : null
     };
   },

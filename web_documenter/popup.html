@@ -29,12 +29,15 @@
       <div class="label">문서 형식</div>
       <select id="format">
         <option value="md">Markdown (.md)</option>
+        <option value="pdf">PDF (.pdf)</option>
         <option value="doc">Word 문서 (.doc)</option>
         <option value="html">웹 문서 (.html)</option>
         <option value="txt">텍스트 (.txt)</option>
       </select>
     </div>
+    <div class="hint" id="formatHint"></div>
 
+    <label class="check"><input type="checkbox" id="includeImages"> 본문 그림 포함</label>
     <label class="check"><input type="checkbox" id="autoCapture"> 페이지를 열 때마다 자동 수집</label>
     <label class="check"><input type="checkbox" id="autoScroll"> 저장 전 페이지 끝까지 자동 스크롤</label>
     <label class="check"><input type="checkbox" id="skipDuplicates"> 같은 주소는 중복 수집 안 함</label>

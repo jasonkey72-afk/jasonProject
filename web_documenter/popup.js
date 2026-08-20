@@ -10,6 +10,12 @@ const MODE_HINT = {
   single: '담는 즉시 페이지마다 파일 하나씩 바로 저장됩니다.'
 };
 
+const FORMAT_HINT = {
+  pdf: 'PDF는 인쇄 창이 열립니다. 대상을 "PDF로 저장"으로 고른 뒤 저장하세요.',
+  txt: '텍스트 형식에는 그림이 들어가지 않습니다.',
+  doc: 'Word에서 "형식이 다릅니다" 안내가 뜨면 [예]를 누르세요.'
+};
+
 let state = { settings: {}, items: [], tab: null };
 
 function send(message) {
@@ -53,6 +59,9 @@ function render() {
   $('modeHint').textContent = MODE_HINT[settings.mode] || '';
 
   $('format').value = settings.format;
+  $('formatHint').textContent = FORMAT_HINT[settings.format] || '';
+  $('formatHint').style.display = FORMAT_HINT[settings.format] ? '' : 'none';
+  $('includeImages').checked = !!settings.includeImages;
   $('autoCapture').checked = !!settings.autoCapture;
   $('autoScroll').checked = !!settings.autoScroll;
   $('skipDuplicates').checked = !!settings.skipDuplicates;
@@ -76,7 +85,8 @@ function render() {
     title.title = it.url;
     const meta = document.createElement('div');
     meta.className = 'it-meta';
-    meta.textContent = `${new URL(it.url).hostname} · 약 ${it.charCount.toLocaleString()}자`;
+    meta.textContent = `${new URL(it.url).hostname} · 약 ${it.charCount.toLocaleString()}자`
+      + (it.imageCount ? ` · 그림 ${it.imageCount}장` : '');
     body.append(title, meta);
 
     const del = document.createElement('button');
@@ -113,6 +123,7 @@ $('captureBtn').addEventListener('click', () => {
   withBusy($('captureBtn'), '읽는 중...', async () => {
     const res = await send({ type: 'CAPTURE_CURRENT' });
     if (res.status === 'duplicate') status('이미 수집한 페이지입니다.', true);
+    else if (res.status === 'printing') status(`인쇄 창에서 "PDF로 저장"을 선택하세요.\n${res.filename}`);
     else if (res.status === 'saved') status(`저장 완료 · ${res.filename}`);
     else status(`담았습니다. (총 ${res.count}건)`);
     await refresh();
@@ -132,7 +143,7 @@ $('format').addEventListener('change', async (e) => {
   await refresh();
 });
 
-['autoCapture', 'autoScroll', 'skipDuplicates'].forEach((key) => {
+['includeImages', 'autoCapture', 'autoScroll', 'skipDuplicates'].forEach((key) => {
   $(key).addEventListener('change', async (e) => {
     await send({ type: 'SET_SETTINGS', patch: { [key]: e.target.checked } });
     if (key === 'autoCapture') {
@@ -145,15 +156,23 @@ $('format').addEventListener('change', async (e) => {
 $('exportMerged').addEventListener('click', () => {
   withBusy($('exportMerged'), '저장 중...', async () => {
     const res = await send({ type: 'EXPORT', style: 'merged' });
-    status(`${res.count}건을 하나의 문서로 저장했습니다.\n${res.filename}`);
+    status(res.printing
+      ? `${res.count}건을 인쇄 창에서 "PDF로 저장" 하세요.\n${res.filename}`
+      : `${res.count}건을 하나의 문서로 저장했습니다.\n${res.filename}`);
     await refresh();
   });
 });
 
 $('exportSeparate').addEventListener('click', () => {
+  // PDF 는 문서마다 인쇄 창이 필요하므로 미리 알려 준다.
+  if (state.settings.format === 'pdf' && state.items.length > 1
+      && !confirm(`PDF는 문서마다 인쇄 창이 열립니다.\n탭 ${state.items.length}개를 열고 순서대로 저장할까요?`)) return;
+
   withBusy($('exportSeparate'), '저장 중...', async () => {
     const res = await send({ type: 'EXPORT', style: 'separate' });
-    status(`${res.count}건을 각각의 파일로 저장했습니다.\n${res.filename}`);
+    status(res.printing
+      ? `인쇄 탭 ${res.count}개를 열었습니다. 탭마다 "PDF로 저장" 하세요.`
+      : `${res.count}건을 각각의 파일로 저장했습니다.\n${res.filename}`);
     await refresh();
   });
 });

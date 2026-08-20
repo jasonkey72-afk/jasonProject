@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "웹 본문 문서화 도구",
-  "version": "1.0.0",
-  "description": "웹 페이지 본문 전체를 스크롤 없이 한 번에 수집해 문서(Markdown/Word/HTML/텍스트)로 저장합니다. 일괄/건별 저장 지원.",
+  "version": "1.1.0",
+  "description": "웹 페이지 본문 전체를 스크롤 없이 한 번에 수집해 문서(Markdown/PDF/Word/HTML/텍스트)로 저장합니다. 그림 포함, 일괄/건별 저장 지원.",
   "permissions": [
     "storage",
     "downloads",
