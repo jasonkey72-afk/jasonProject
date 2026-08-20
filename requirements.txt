@@ -1,2 +1,8 @@
-pywin32>=306
+# Windows 전용 (Excel / PowerPoint COM 자동화)
+pywin32>=306; sys_platform == "win32"
+
+# MP4 → GIF 변환용 ffmpeg 실행 파일 동봉 패키지
+imageio-ffmpeg>=0.4.9
+
+# exe 빌드용
 pyinstaller>=6.0
