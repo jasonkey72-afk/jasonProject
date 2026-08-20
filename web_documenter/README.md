@@ -34,9 +34,11 @@
 
 ## 1. 설치 방법 (부서원 각자 1회)
 
-크롬 웹스토어 등록 없이, 폴더째로 설치합니다.
+크롬 웹스토어 등록 없이, 폴더째로 설치합니다. 관리자 권한은 필요 없습니다.
+배포용 파일은 [`package/web_documenter_v1.0.0.zip`](package/web_documenter_v1.0.0.zip)
+하나이며, 압축 안에 같은 내용의 `설치방법.txt` 가 들어 있습니다.
 
-1. `web_documenter` 폴더를 통째로 받아 PC에 둡니다. (예: `C:\사내도구\web_documenter`)
+1. ZIP 을 풀어 `web_documenter` 폴더를 PC에 둡니다. (예: `C:\사내도구\web_documenter`)
    - 폴더 안에 `manifest.json` 이 보여야 합니다. 압축 파일이면 먼저 압축을 풉니다.
 2. 브라우저 주소창에 아래 주소를 입력합니다.
    - Chrome: `chrome://extensions`
@@ -136,4 +138,7 @@ node test/run_test.mjs
 | `content.js` | 페이지 안에서 본문을 찾아 Markdown/HTML/텍스트로 변환 |
 | `background.js` | 수집 목록 관리, 자동 수집, 문서 생성 및 파일 저장 |
 | `popup.html/css/js` | 아이콘 클릭 시 뜨는 조작 화면 |
+| `설치방법.txt` | 배포본에 함께 들어가는 설치 안내 (메모장용) |
+| `package.bat` | 배포용 ZIP 새로 만들기 (코드 수정 후 실행) |
+| `package/` | 배포용 ZIP 결과물 |
 | `test/` | Playwright 기반 검증 스크립트와 시험용 페이지 |
