@@ -180,3 +180,18 @@ select {
 }
 
 .status.error { color: #c0392b; }
+
+.warn {
+  background: #fdecea;
+  border: 1px solid #f0b4ad;
+  color: #a4302a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.warn b { color: #7d201b; }
+
+.ver { text-align: center; font-size: 10px; color: #b6bbc4; margin-top: 4px; }

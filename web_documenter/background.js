@@ -3,6 +3,10 @@
  */
 'use strict';
 
+// 이 값이 popup.js 의 BUILD 와 다르면, 파일은 새 것인데 실행 중인 코드가 옛날 것이라는 뜻이다.
+// (확장 폴더의 파일만 교체하고 chrome://extensions 에서 새로고침을 하지 않은 경우)
+const BUILD = '1.1.1';
+
 const DEFAULT_SETTINGS = {
   mode: 'batch',          // 'batch' = 일괄(모아뒀다 한 번에) / 'single' = 건 별(즉시 저장)
   format: 'md',           // md | txt | doc | html
@@ -25,6 +29,15 @@ const FORMATS = {
 };
 
 const isPrintFormat = (format) => !!(FORMATS[format] || {}).print;
+
+const RELOAD_GUIDE = 'chrome://extensions 에서 이 확장의 새로고침(↻)을 누른 뒤 다시 시도해 주세요.';
+
+/** 알 수 없는 형식이면 엉뚱한 파일을 만들지 않고 원인을 알려 준다. */
+function formatOf(name) {
+  const fmt = FORMATS[name];
+  if (!fmt) throw new Error(`알 수 없는 문서 형식(${name})입니다. ${RELOAD_GUIDE}`);
+  return fmt;
+}
 
 /* ---------------------------------------------------------------- */
 /* 저장소                                                            */
@@ -498,13 +511,13 @@ function itemName(item, settings, prefix) {
     asciiDir: ASCII_FOLDER,
     base: `${prefix || time}_${safeName(item.title)}`,
     asciiBase: `${prefix || time}_${asciiName(item.title, urlSlug(item.url))}`,
-    ext: (FORMATS[settings.format] || FORMATS.md).ext
+    ext: formatOf(settings.format).ext
   };
 }
 
 async function saveOne(item, settings) {
   if (isPrintFormat(settings.format)) return openPrintTab([item], settings, '');
-  const fmt = FORMATS[settings.format] || FORMATS.md;
+  const fmt = formatOf(settings.format);
   return download(itemName(item, settings), buildContent([item], settings.format, ''), fmt.mime);
 }
 
@@ -514,7 +527,7 @@ async function exportAll(style) {
   const items = await getItems();
   if (!items.length) throw new Error('수집한 페이지가 없습니다.');
 
-  const fmt = FORMATS[settings.format] || FORMATS.md;
+  const fmt = formatOf(settings.format);
   const time = stamp();
 
   // PDF: 브라우저 인쇄 기능으로 저장한다.
@@ -604,13 +617,17 @@ const HANDLERS = {
     const [settings, items] = await Promise.all([getSettings(), getItems()]);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return {
+      build: BUILD,
+      formats: Object.keys(FORMATS),
       settings,
       items: items.map(({ id, title, url, charCount, imageCount, capturedAt }) => ({ id, title, url, charCount, imageCount, capturedAt })),
       tab: tab ? { id: tab.id, title: tab.title, url: tab.url, capturable: isCapturable(tab.url) } : null
     };
   },
   async SET_SETTINGS(msg) {
-    return { settings: await setSettings(msg.patch || {}) };
+    const patch = msg.patch || {};
+    if ('format' in patch) formatOf(patch.format); // 지원하지 않는 형식이면 여기서 알려 준다
+    return { settings: await setSettings(patch) };
   },
   async CAPTURE_CURRENT() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

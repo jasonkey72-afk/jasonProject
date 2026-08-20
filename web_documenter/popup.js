@@ -5,6 +5,9 @@
 
 const $ = (id) => document.getElementById(id);
 
+// background.js 의 BUILD 와 같아야 한다. 다르면 확장 새로고침이 필요한 상태다.
+const BUILD = '1.1.1';
+
 const MODE_HINT = {
   batch: '여러 페이지를 담아 두었다가 마지막에 한 번에 저장합니다.',
   single: '담는 즉시 페이지마다 파일 하나씩 바로 저장됩니다.'
@@ -42,6 +45,17 @@ async function refresh() {
 function render() {
   const { settings, items, tab } = state;
 
+  // 폴더의 파일만 교체하고 확장을 새로고침하지 않으면, 화면은 새 버전인데
+  // 실제 동작은 옛 버전이라 엉뚱한 형식으로 저장될 수 있다. 이를 먼저 알린다.
+  const stale = state.build !== BUILD;
+  $('stale').style.display = stale ? '' : 'none';
+  if (stale) {
+    $('stale').innerHTML = '<b>확장 새로고침이 필요합니다.</b><br>'
+      + '주소창에 <b>chrome://extensions</b> 를 열고 이 확장의 <b>새로고침(↻)</b>을 누른 뒤 다시 사용해 주세요.<br>'
+      + `(화면 ${BUILD} / 동작 ${state.build || '이전 버전'})`;
+  }
+  $('ver').textContent = `버전 ${state.build || '?'}`;
+
   $('count').textContent = `${items.length}건`;
   $('pageTitle').textContent = (tab && tab.title) || '페이지 없음';
   $('pageUrl').textContent = (tab && tab.url) || '';
@@ -57,6 +71,14 @@ function render() {
     b.classList.toggle('on', b.dataset.mode === settings.mode);
   });
   $('modeHint').textContent = MODE_HINT[settings.mode] || '';
+
+  // 실행 중인 코드가 지원하는 형식만 고를 수 있게 한다.
+  const supported = Array.isArray(state.formats) ? state.formats : null;
+  Array.from($('format').options).forEach((opt) => {
+    const ok = !supported || supported.includes(opt.value);
+    opt.disabled = !ok;
+    opt.textContent = opt.textContent.replace(' (새로고침 필요)', '') + (ok ? '' : ' (새로고침 필요)');
+  });
 
   $('format').value = settings.format;
   $('formatHint').textContent = FORMAT_HINT[settings.format] || '';

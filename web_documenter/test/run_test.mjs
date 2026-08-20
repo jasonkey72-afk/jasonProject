@@ -331,6 +331,52 @@ check('자동 수집 + PDF - 인쇄 창 대신 목록에 담김', autoPdf.items.
 await page3.close();
 await call('SET_SETTINGS', { patch: { autoCapture: false, mode: 'batch', format: 'md' } });
 
+// ---------------------------------------------------------------- 12. 버전이 어긋난 상태(확장 새로고침 안 함) 방어
+const st = await call('GET_STATE');
+check('실행 중인 코드의 버전/지원 형식 제공', !!st.build && Array.isArray(st.formats) && st.formats.includes('pdf'),
+  `build=${st.build} formats=${(st.formats || []).join(',')}`);
+
+const badFormat = await call('SET_SETTINGS', { patch: { format: 'pdfx' } });
+check('알 수 없는 형식은 조용히 다른 파일로 저장하지 않음',
+  badFormat.ok === false && /새로고침/.test(badFormat.error || ''), badFormat.error);
+const keptFormat = (await call('GET_STATE')).settings.format;
+check('잘못된 형식은 설정에 저장되지 않음', keptFormat !== 'pdfx', `format=${keptFormat}`);
+
+// ---------------------------------------------------------------- 13. 팝업 화면으로 PDF 저장까지 (실사용 경로)
+await call('CLEAR_ITEMS');
+await call('SET_SETTINGS', { patch: { mode: 'batch', format: 'md', includeImages: false, autoCapture: false } });
+await page.bringToFront();
+await page.goto(`${base}/board.html`);
+await page.waitForLoadState('networkidle');
+await capture();
+
+const ui = await ctx.newPage();
+await ui.goto(`chrome-extension://${new URL(sw.url()).host}/popup.html`);
+await ui.waitForTimeout(700);
+await ui.selectOption('#format', 'pdf');
+await ui.waitForTimeout(500);
+check('팝업에서 PDF 선택이 저장됨', (await call('GET_STATE')).settings.format === 'pdf');
+check('팝업에 PDF 안내 문구 표시',
+  /PDF로 저장/.test(await ui.$eval('#formatHint', (e) => e.textContent)));
+
+const beforeUi = ctx.pages().length;
+await ui.click('#exportMerged');
+await ui.waitForTimeout(2500);
+const uiPrintTabs = ctx.pages().filter((p) => p.url().includes('print.html'));
+check('팝업 버튼으로 PDF 저장 시 인쇄 탭 열림', uiPrintTabs.length === 1,
+  `탭 ${ctx.pages().length - beforeUi}개 / 상태: ${await ui.$eval('#status', (e) => e.textContent.replace(/\n/g, ' '))}`);
+for (const p of uiPrintTabs) await p.close();
+
+// 버전이 어긋나면 팝업이 새로고침 안내를 띄운다
+await ui.evaluate(() => { state.build = '0.0.0'; render(); });
+const warn = await ui.evaluate(() => ({
+  shown: getComputedStyle(document.getElementById('stale')).display !== 'none',
+  text: document.getElementById('stale').textContent
+}));
+check('버전 불일치 시 새로고침 안내 표시', warn.shown && /새로고침/.test(warn.text),
+  warn.text.slice(0, 40));
+await ui.close();
+
 // ---------------------------------------------------------------- 마무리
 await ctx.close();
 server.close();
