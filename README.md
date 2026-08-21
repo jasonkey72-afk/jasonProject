@@ -39,15 +39,22 @@
 
 ## 1. 실행파일(exe) 빌드하기 (담당자 1회 작업)
 
-Windows PC + Python 3.9 이상이 설치된 환경에서:
+Windows PC + Python 3.9 이상이 설치된 환경에서 **`build_splitter.bat` 을 더블클릭**하면 됩니다.
+완료되면 `dist\Office_파일_분할기.exe` 가 생성됩니다. **이 exe 파일 하나만**
+부서원들에게 복사해 주면 됩니다.
+
+배치 파일은 Python 을 찾아 `build_exe.py` 를 실행하는 역할만 하므로,
+명령 프롬프트에서 직접 실행해도 결과는 같습니다.
 
 ```bat
-build_splitter.bat
+python build_exe.py splitter     :: 분할기만
+python build_exe.py pdf          :: PDF 변환기만
+python build_exe.py all          :: 둘 다
+python build_exe.py splitter --dry-run   :: 실제 빌드 없이 계획만 확인
 ```
 
-더블클릭하거나 명령 프롬프트에서 실행하면 됩니다. 완료되면
-`dist\Office_파일_분할기.exe` 가 생성됩니다. **이 exe 파일 하나만**
-부서원들에게 복사해 주면 됩니다.
+Python 이 설치되어 있지 않으면 설치 안내가 화면에 표시되고, 사내망이라 pip 설치가
+막힌 경우에는 이미 설치된 패키지로 계속 진행합니다.
 
 > 이 저장소(리눅스 컨테이너)에서는 Windows용 exe를 직접 빌드할 수 없으므로,
 > `build_splitter.bat` 을 Windows PC에서 한 번 실행해 exe를 만들어야 합니다.
@@ -84,6 +91,7 @@ python office_file_splitter.py
 ```bat
 python tests\test_splitter_core.py    :: 실제 파일을 만들어 나누고 내용 보존까지 확인
 python tests\test_ui_smoke.py         :: 화면을 띄워 추가~완료까지 자동으로 눌러 봄
+python tests\test_batch_files.py      :: .bat 파일이 cmd.exe 에서 깨지지 않는지 검사
 ```
 
 분할 기능은 `splitter_core.py` 에 화면과 분리되어 있어, 다른 스크립트에서
@@ -106,6 +114,7 @@ print(result.parts)
 | 엑셀에서 차트·그림이 사라짐 | 정상 동작입니다. 차트·그림까지 유지해야 한다면 원본에서 해당 시트만 따로 저장해 주세요 |
 | 매우 큰 엑셀에서 시간이 오래 걸림 | 처리 방식을 **빠르게** 로 두면 훨씬 빠릅니다 (서식 제외) |
 | 드래그 앤 드롭이 안 됨 | 클릭해서 파일을 고르면 됩니다. (드래그는 tkinterdnd2 가 포함되어 빌드된 경우에만 동작) |
+| bat 실행 시 "내부 또는 외부 명령…" 오류 | 배치 파일이 깨진 경우입니다. 아래 **배치 파일 수정 규칙**을 참고하세요. `python build_exe.py splitter` 로 직접 빌드해도 됩니다 |
 
 ---
 
@@ -130,14 +139,10 @@ print(result.parts)
 
 ## 1. 실행파일(exe) 빌드하기 (담당자 1회 작업)
 
-Windows PC + Python 3.9 이상이 설치된 환경에서:
+Windows PC + Python 3.9 이상이 설치된 환경에서 **`build.bat` 을 더블클릭**하면 됩니다.
+(명령 프롬프트에서 `python build_exe.py pdf` 를 실행해도 같습니다)
 
-```bat
-build.bat
-```
-
-더블클릭하거나 명령 프롬프트에서 실행하면 됩니다. 완료되면
-`dist\Excel_to_PDF_변환기.exe` 파일이 생성됩니다. **이 exe 파일 하나만**
+완료되면 `dist\Excel_to_PDF_변환기.exe` 파일이 생성됩니다. **이 exe 파일 하나만**
 부서원들에게 복사해서 배포하면 됩니다. (배포받는 사람은 Python을 설치할
 필요가 없고, Excel만 있으면 됩니다.)
 
@@ -179,7 +184,25 @@ office_file_splitter.py   분할기 본체 (화면 + 실행 흐름)
 office_splitter_ui.py     분할기 화면 구성 요소 (버튼·토글·진행바 등)
 splitter_core.py          분할 엔진 (화면과 분리, 단독 사용 가능)
 excel_to_pdf_converter.py Excel → PDF 변환기
-build_splitter.bat        분할기 exe 빌드
-build.bat                 변환기 exe 빌드
+build_exe.py              실제 빌드 작업 (한글 안내 포함)
+build_splitter.bat        분할기 exe 빌드 (build_exe.py 를 부르는 역할만)
+build.bat                 변환기 exe 빌드 (동일)
+docs/help_python_ko.txt   Python 미설치 시 보여 줄 한글 안내
+.gitattributes            .bat 을 항상 CRLF 로 받도록 지정
 tests/                    자동 검증 스크립트
 ```
+
+## 배치 파일(.bat) 수정 규칙 — 중요
+
+cmd.exe 는 `.bat` 파일을 UTF-8 이 아니라 **OEM 코드페이지(한국어 Windows 는 949)** 로 읽습니다.
+그래서 아래 세 가지가 있으면 줄이 깨지면서
+`'...'은(는) 내부 또는 외부 명령, 실행할 수 있는 프로그램, 또는 배치 파일이 아닙니다` 오류가 납니다.
+
+| 하지 말 것 | 이유 | 대신 |
+|---|---|---|
+| 배치 파일에 한글 쓰기 | CP949 로 잘못 읽혀 깨짐 | 한글 메시지는 `build_exe.py` 에 두기 |
+| LF 줄바꿈으로 저장 | 리눅스/맥에서 만들면 기본값. cmd 가 줄을 잘못 끊음 | **반드시 CRLF** (`.gitattributes` 로 강제) |
+| 줄 끝에 `^` (줄 연속) | 위 두 문제와 겹치면 다음 줄이 명령으로 실행됨 | 한 줄로 쓰거나 파이썬으로 옮기기 |
+
+`python tests/test_batch_files.py` 를 실행하면 이 규칙을 자동으로 검사합니다.
+배치 파일을 고친 뒤에는 반드시 한 번 돌려 보세요.

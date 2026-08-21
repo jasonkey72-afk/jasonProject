@@ -1,0 +1,6 @@
+# cmd.exe 가 .bat 을 제대로 읽으려면 줄바꿈이 반드시 CRLF 여야 한다
+*.bat text eol=crlf
+*.txt text eol=crlf
+*.py  text eol=lf
+*.md  text eol=lf
+*.png binary
