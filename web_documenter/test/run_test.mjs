@@ -13,6 +13,39 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
+
+/** .pptx(ZIP) 안의 파일을 읽는다. 중앙 디렉터리를 직접 훑어 외부 라이브러리를 쓰지 않는다. */
+function readZip(buffer) {
+  const end = buffer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = buffer.readUInt16LE(end + 10);
+  let at = buffer.readUInt32LE(end + 16);
+  const files = new Map();
+  const order = [];
+
+  for (let i = 0; i < count; i++) {
+    const method = buffer.readUInt16LE(at + 10);
+    const compressed = buffer.readUInt32LE(at + 20);
+    const raw = buffer.readUInt32LE(at + 24);
+    const nameLen = buffer.readUInt16LE(at + 28);
+    const extraLen = buffer.readUInt16LE(at + 30);
+    const commentLen = buffer.readUInt16LE(at + 32);
+    const offset = buffer.readUInt32LE(at + 42);
+    const name = buffer.toString('utf8', at + 46, at + 46 + nameLen);
+
+    const localNameLen = buffer.readUInt16LE(offset + 26);
+    const localExtraLen = buffer.readUInt16LE(offset + 28);
+    const start = offset + 30 + localNameLen + localExtraLen;
+    const body = buffer.subarray(start, start + compressed);
+    const data = method === 8 ? zlib.inflateRawSync(body) : body;
+    if (data.length !== raw) throw new Error(`${name}: 크기 불일치`);
+
+    files.set(name, data);
+    order.push(name);
+    at += 46 + nameLen + extraLen + commentLen;
+  }
+  return { files, order };
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SITE = path.join(HERE, 'fixtures');
@@ -376,6 +409,98 @@ const warn = await ui.evaluate(() => ({
 check('버전 불일치 시 새로고침 안내 표시', warn.shown && /새로고침/.test(warn.text),
   warn.text.slice(0, 40));
 await ui.close();
+
+// ---------------------------------------------------------------- 14. PowerPoint(.pptx) 저장
+await call('CLEAR_ITEMS');
+await call('SET_SETTINGS', { patch: { mode: 'batch', format: 'pptx', includeImages: true, autoScroll: false } });
+await page.bringToFront();
+await page.goto(`${base}/board.html`);
+await page.waitForLoadState('networkidle');
+await capture();
+await page.goto(`${base}/lazy.html`);
+await page.waitForLoadState('networkidle');
+await capture();
+
+const sincePptx = await lastDownloadId();
+const expPptx = await call('EXPORT', { style: 'merged' });
+const dlPptx = await waitDownloads(sincePptx);
+check('pptx 저장', expPptx.ok && /\.pptx$/.test(expPptx.filename || '') && dlPptx.length === 1,
+  expPptx.filename || expPptx.error);
+
+if (dlPptx.length) {
+  const target = path.join(OUT, 'sample.pptx');
+  fs.copyFileSync(dlPptx[0].filename, target);
+  const size = fs.statSync(target).size;
+  check('pptx 파일 생성 (그림 포함)', size > 50 * 1024, `${Math.round(size / 1024)}KB`);
+}
+
+// ---------------------------------------------------------------- 15. pptx 파일 구조 검증
+if (fs.existsSync(path.join(OUT, 'sample.pptx'))) {
+  const buf = fs.readFileSync(path.join(OUT, 'sample.pptx'));
+  const { files, order } = readZip(buf);
+  const text = (name) => (files.get(name) || Buffer.alloc(0)).toString('utf8');
+
+  check('pptx - [Content_Types].xml 이 첫 항목', order[0] === '[Content_Types].xml', order[0]);
+
+  const required = ['[Content_Types].xml', '_rels/.rels', 'ppt/presentation.xml',
+    'ppt/_rels/presentation.xml.rels', 'ppt/theme/theme1.xml',
+    'ppt/slideMasters/slideMaster1.xml', 'ppt/slideMasters/_rels/slideMaster1.xml.rels',
+    'ppt/slideLayouts/slideLayout1.xml', 'ppt/slideLayouts/_rels/slideLayout1.xml.rels'];
+  const missing = required.filter((f) => !files.has(f));
+  check('pptx - 필수 구성 파일 모두 존재', missing.length === 0, missing.join(', '));
+
+  const slideNames = order.filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  const sldIds = (text('ppt/presentation.xml').match(/<p:sldId /g) || []).length;
+  const overrides = (text('[Content_Types].xml').match(/presentationml\.slide\+xml/g) || []).length;
+  check('pptx - 슬라이드 수가 목록/형식 선언과 일치',
+    slideNames.length > 4 && slideNames.length === sldIds && sldIds === overrides,
+    `슬라이드 ${slideNames.length} / 목록 ${sldIds} / 형식선언 ${overrides}`);
+
+  // 모든 XML 이 올바른 형식인지 브라우저 파서로 확인한다.
+  const xmlNames = order.filter((n) => n.endsWith('.xml') || n.endsWith('.rels'));
+  const badXml = await page.evaluate((docs) => docs.filter(([, body]) => {
+    const doc = new DOMParser().parseFromString(body, 'application/xml');
+    return doc.getElementsByTagName('parsererror').length > 0;
+  }).map(([name]) => name), xmlNames.map((n) => [n, text(n)]));
+  check('pptx - 모든 XML 이 올바른 형식', badXml.length === 0, badXml.join(', '));
+
+  // 슬라이드마다 레이아웃 연결이 있어야 PowerPoint 가 연다
+  const noLayout = slideNames.filter((n) => {
+    const rels = text(n.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels');
+    return !rels.includes('slideLayout1.xml');
+  });
+  check('pptx - 슬라이드마다 레이아웃 연결', noLayout.length === 0, noLayout.join(', '));
+
+  // 그림: 슬라이드가 참조하는 media 파일이 실제로 들어 있어야 한다
+  const mediaFiles = order.filter((n) => n.startsWith('ppt/media/'));
+  const brokenImage = slideNames.some((n) => {
+    const rels = text(n.replace('ppt/slides/', 'ppt/slides/_rels/') + '.rels');
+    return Array.from(rels.matchAll(/Target="\.\.\/media\/([^"]+)"/g))
+      .some((m) => !files.has(`ppt/media/${m[1]}`));
+  });
+  check('pptx - 그림이 파일 안에 포함됨', mediaFiles.length === 1 && !brokenImage,
+    mediaFiles.join(', '));
+
+  const allSlides = slideNames.map(text).join('');
+  check('pptx - 표가 표 개체로 들어감', allSlides.includes('<a:tbl>') && allSlides.includes('전표 마감'));
+  check('pptx - 그림 개체 포함', allSlides.includes('<p:pic>'));
+  check('pptx - 한글 본문 유지', allSlides.includes('결산 일정') && allSlides.includes('재고 실사표'));
+  check('pptx - 그림 설명 중복 없음',
+    (allSlides.match(/ERP 전표입력 화면/g) || []).length === 1,
+    `${(allSlides.match(/ERP 전표입력 화면/g) || []).length}회 등장`);
+
+  // 도형이 슬라이드 밖으로 나가지 않는지 (13.333 x 7.5인치 = 12192000 x 6858000 EMU)
+  const overflow = [];
+  slideNames.forEach((n) => {
+    const body = text(n);
+    for (const m of body.matchAll(/<a:off x="(-?\d+)" y="(-?\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/g)) {
+      const [x, y, cx, cy] = m.slice(1).map(Number);
+      if (cx === 0 && cy === 0) continue;                       // 그룹 기준점
+      if (x < 0 || y < 0 || x + cx > 12192000 || y + cy > 6858000) overflow.push(`${n} ${x},${y} ${cx}x${cy}`);
+    }
+  });
+  check('pptx - 모든 개체가 슬라이드 안에 배치됨', overflow.length === 0, overflow.slice(0, 2).join(' / '));
+}
 
 // ---------------------------------------------------------------- 마무리
 await ctx.close();

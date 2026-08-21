@@ -6,7 +6,7 @@
 const $ = (id) => document.getElementById(id);
 
 // background.js 의 BUILD 와 같아야 한다. 다르면 확장 새로고침이 필요한 상태다.
-const BUILD = '1.1.1';
+const BUILD = '1.2.0';
 
 const MODE_HINT = {
   batch: '여러 페이지를 담아 두었다가 마지막에 한 번에 저장합니다.',
@@ -16,7 +16,8 @@ const MODE_HINT = {
 const FORMAT_HINT = {
   pdf: 'PDF는 인쇄 창이 열립니다. 대상을 "PDF로 저장"으로 고른 뒤 저장하세요.',
   txt: '텍스트 형식에는 그림이 들어가지 않습니다.',
-  doc: 'Word에서 "형식이 다릅니다" 안내가 뜨면 [예]를 누르세요.'
+  doc: 'Word에서 "형식이 다릅니다" 안내가 뜨면 [예]를 누르세요.',
+  pptx: '제목 단위로 슬라이드가 나뉩니다. 표는 표 개체로, 그림은 한 장에 하나씩 들어갑니다.'
 };
 
 let state = { settings: {}, items: [], tab: null };

@@ -3,9 +3,12 @@
  */
 'use strict';
 
+// PowerPoint 파일 생성기 (ZIP + PresentationML)
+importScripts('pptx.js');
+
 // 이 값이 popup.js 의 BUILD 와 다르면, 파일은 새 것인데 실행 중인 코드가 옛날 것이라는 뜻이다.
 // (확장 폴더의 파일만 교체하고 chrome://extensions 에서 새로고침을 하지 않은 경우)
-const BUILD = '1.1.1';
+const BUILD = '1.2.0';
 
 const DEFAULT_SETTINGS = {
   mode: 'batch',          // 'batch' = 일괄(모아뒀다 한 번에) / 'single' = 건 별(즉시 저장)
@@ -24,6 +27,11 @@ const FORMATS = {
   md: { ext: 'md', mime: 'text/markdown' },
   pdf: { ext: 'pdf', mime: 'application/pdf', print: true }, // 브라우저 인쇄 기능으로 저장
   doc: { ext: 'doc', mime: 'application/msword' },
+  pptx: {
+    ext: 'pptx',
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    binary: true
+  },
   html: { ext: 'html', mime: 'text/html' },
   txt: { ext: 'txt', mime: 'text/plain' }
 };
@@ -467,6 +475,12 @@ async function openPrintTab(items, settings, mergedTitle, background) {
   return `${name}.pdf`;
 }
 
+/** 선택한 형식의 파일 내용을 만든다. (pptx 는 이진 데이터) */
+async function contentFor(items, settings, mergedTitle) {
+  if (settings.format === 'pptx') return buildPptx(items, mergedTitle, humanTime);
+  return buildContent(items, settings.format, mergedTitle);
+}
+
 function utf8ToBase64(str) {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -487,7 +501,9 @@ let unicodeFilenameOk = true;
  * @returns {Promise<string>} 실제로 저장된 경로
  */
 async function download(name, content, mime) {
-  const url = `data:${mime};charset=utf-8;base64,${utf8ToBase64(content)}`;
+  const base64 = typeof content === 'string' ? utf8ToBase64(content) : bytesToBase64(content);
+  const charset = typeof content === 'string' ? ';charset=utf-8' : '';
+  const url = `data:${mime}${charset};base64,${base64}`;
   const primary = `${name.dir}/${name.base}.${name.ext}`;
   const fallback = `${name.asciiDir}/${name.asciiBase}.${name.ext}`;
 
@@ -518,7 +534,7 @@ function itemName(item, settings, prefix) {
 async function saveOne(item, settings) {
   if (isPrintFormat(settings.format)) return openPrintTab([item], settings, '');
   const fmt = formatOf(settings.format);
-  return download(itemName(item, settings), buildContent([item], settings.format, ''), fmt.mime);
+  return download(itemName(item, settings), await contentFor([item], settings, ''), fmt.mime);
 }
 
 /** 일괄 저장: merged(하나로 합침) 또는 separate(건별 파일) */
@@ -550,7 +566,7 @@ async function exportAll(style) {
       const name = itemName(items[i], settings, seq);
       name.dir = `${settings.folder}/모음_${time}`;
       name.asciiDir = `${ASCII_FOLDER}/collection_${time}`;
-      saved = await download(name, buildContent([items[i]], settings.format, ''), fmt.mime);
+      saved = await download(name, await contentFor([items[i]], settings, ''), fmt.mime);
     }
     return { count: items.length, filename: saved.slice(0, saved.lastIndexOf('/') + 1) };
   }
@@ -562,7 +578,7 @@ async function exportAll(style) {
     base: `모음_${time}_${items.length}건`,
     asciiBase: `collection_${time}_${items.length}items`,
     ext: fmt.ext
-  }, buildContent(items, settings.format, title), fmt.mime);
+  }, await contentFor(items, settings, title), fmt.mime);
 
   return { count: items.length, filename };
 }

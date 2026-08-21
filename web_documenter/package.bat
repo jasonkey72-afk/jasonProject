@@ -9,7 +9,7 @@ REM (검증용 test 폴더는 배포본에 포함하지 않습니다)
 REM ============================================================
 
 setlocal
-set VERSION=1.1.1
+set VERSION=1.2.0
 set NAME=web_documenter
 set STAGE=%TEMP%\%NAME%_pkg
 set OUT=%~dp0package\%NAME%_v%VERSION%.zip
@@ -18,7 +18,7 @@ echo [1/3] 배포 파일을 모읍니다...
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%\%NAME%\icons"
 
-for %%F in (manifest.json background.js content.js popup.html popup.css popup.js print.html print.js README.md 설치방법.txt) do (
+for %%F in (manifest.json background.js content.js popup.html popup.css popup.js print.html print.js pptx.js README.md 설치방법.txt) do (
     copy /y "%~dp0%%F" "%STAGE%\%NAME%\" >nul || goto :fail
 )
 copy /y "%~dp0icons\*.png" "%STAGE%\%NAME%\icons\" >nul || goto :fail
