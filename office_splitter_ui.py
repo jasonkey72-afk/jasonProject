@@ -532,7 +532,7 @@ class DropZone(tk.Canvas):
         self.hover = False
         self.dragging = False
         self.title_text = "여기에 파일을 끌어다 놓으세요"
-        self.hint_text = "또는 클릭해서 선택  ·  xlsx · xlsm · docx · pptx"
+        self.hint_text = "또는 클릭해서 선택  ·  xlsx · xlsm · docx · pptx · pdf"
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Enter>", lambda e: (setattr(self, "hover", True), self._draw()))
         self.bind("<Leave>", lambda e: (setattr(self, "hover", False), self._draw()))

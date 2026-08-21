@@ -1,7 +1,7 @@
 """
 exe 빌드 스크립트
 ==================
-build_splitter.bat / build.bat 이 이 파일을 실행합니다.
+build_splitter.bat 이 이 파일을 실행합니다.
 
 배치 파일(.bat)은 cmd.exe 가 한글(UTF-8)과 줄바꿈에 매우 민감해서
 조금만 어긋나도 "내부 또는 외부 명령이 아닙니다" 오류가 납니다.
@@ -10,10 +10,9 @@ build_splitter.bat / build.bat 이 이 파일을 실행합니다.
 (파이썬은 인코딩 문제 없이 한글을 출력합니다)
 
 직접 실행할 수도 있습니다:
-    python build_exe.py splitter     분할기만 빌드
-    python build_exe.py pdf          PDF 변환기만 빌드
-    python build_exe.py all          둘 다 빌드
-    python build_exe.py splitter --dry-run    실제 빌드 없이 계획만 출력
+    python build_exe.py              실행파일 만들기
+    python build_exe.py splitter     (같은 동작 — 배치 파일이 이렇게 부른다)
+    python build_exe.py --dry-run    실제 빌드 없이 계획만 출력
 """
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ TARGETS = {
         script="office_file_splitter.py",
         build_name="OfficeFileSplitter",
         final_name="Office_파일_분할기.exe",
-        packages=["openpyxl", "python-docx", "python-pptx"],
+        packages=["openpyxl", "python-docx", "python-pptx", "pypdf"],
         optional_packages=["tkinterdnd2"],
         extra_args=[
             "--collect-data", "docx",
@@ -67,16 +66,6 @@ TARGETS = {
             "--collect-data", "openpyxl",
         ],
         note="받는 분의 PC에 Python 도, Microsoft Office 도 필요 없습니다.",
-    ),
-    "pdf": Target(
-        key="pdf",
-        title="Excel → PDF 변환기",
-        script="excel_to_pdf_converter.py",
-        build_name="ExcelToPdfConverter",
-        final_name="Excel_to_PDF_변환기.exe",
-        packages=["pywin32"],
-        windows_only=True,
-        note="받는 분의 PC에 Microsoft Excel 이 설치되어 있어야 합니다.",
     ),
 }
 
@@ -150,7 +139,6 @@ def run(cmd, quiet=False):
 MODULE_OF = {
     "python-docx": "docx",
     "python-pptx": "pptx",
-    "pywin32": "win32com.client",
     "pyinstaller": "PyInstaller",
 }
 
@@ -306,14 +294,14 @@ def summary(results):
 def main():
     parser = argparse.ArgumentParser(description="exe 빌드")
     parser.add_argument("target", nargs="?", default="splitter",
-                        choices=["splitter", "pdf", "all"])
+                        choices=["splitter"])
     parser.add_argument("--dry-run", action="store_true",
                         help="실제로 빌드하지 않고 실행할 명령만 보여 준다")
     parser.add_argument("--skip-install", action="store_true",
                         help="패키지 설치 단계를 건너뛴다")
     args = parser.parse_args()
 
-    keys = ["splitter", "pdf"] if args.target == "all" else [args.target]
+    keys = [args.target]
     results = []
     for key in keys:
         target = TARGETS[key]

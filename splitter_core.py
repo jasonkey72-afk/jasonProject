@@ -1,13 +1,14 @@
 """
 Office 대용량 파일 분할 엔진
 =============================
-xlsx / xlsm / docx / pptx 파일을 사용자가 지정한 용량(예: 10MB) 이하의
+xlsx / xlsm / docx / pptx / pdf 파일을 사용자가 지정한 용량(예: 10MB) 이하의
 여러 개 파일로 나눈다.
 
 분할 단위
     - xlsx/xlsm : 시트 → (한 시트가 너무 크면) 행 단위. 머리글 행은 매 파일마다 반복.
     - docx      : 문단/표 단위 (문서 흐름 순서 유지)
     - pptx      : 슬라이드 단위 (레이아웃/마스터/테마 그대로 유지)
+    - pdf       : 쪽 단위 (글꼴·이미지·목차 그대로 유지)
 
 동작 방식
     "지정한 용량 이하"를 보장하기 위해, 예상 크기로 한 번 저장해 본 뒤
@@ -32,7 +33,7 @@ KB = 1024
 MB = 1024 * 1024
 
 # 분할할 수 있는 확장자
-SUPPORTED_EXTS = (".xlsx", ".xlsm", ".docx", ".pptx")
+SUPPORTED_EXTS = (".xlsx", ".xlsm", ".docx", ".pptx", ".pdf")
 # 옛날 형식(분할 불가) — 새 형식으로 다시 저장해야 한다
 LEGACY_EXTS = (".xls", ".doc", ".ppt")
 
@@ -303,6 +304,74 @@ def split_pptx(src: Path, out_dir: Path, opts: SplitOptions, reporter: Reporter,
     result.parts, _ = _pack_units(
         total, write_part, out_dir, stem, ".pptx", opts.max_bytes,
         reporter, est, result.warnings, "슬라이드",
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# PDF — 쪽(page) 단위
+# ---------------------------------------------------------------------------
+
+def _open_pdf(src: Path):
+    """PDF 를 연다. 암호가 걸려 있으면 빈 암호로 한 번 시도해 본다."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(src))
+    if reader.is_encrypted:
+        try:
+            opened = reader.decrypt("")
+        except Exception:
+            opened = 0
+        if not opened:
+            raise SplitError(
+                "암호가 걸린 PDF 는 나눌 수 없습니다. "
+                "암호를 푼 뒤(다른 이름으로 저장) 다시 시도해 주세요."
+            )
+    return reader
+
+
+def split_pdf(src: Path, out_dir: Path, opts: SplitOptions, reporter: Reporter,
+              stem: str) -> SplitResult:
+    from pypdf import PdfWriter
+
+    result = SplitResult(source=src, output_dir=out_dir)
+
+    reader = _open_pdf(src)
+    total = len(reader.pages)
+    del reader
+
+    if total == 0:
+        raise SplitError("쪽이 없는 PDF 입니다.")
+    if total == 1:
+        raise SplitError("1쪽짜리라 더 나눌 수 없습니다.")
+
+    reporter.log(f"  {total}쪽을 나눕니다.")
+
+    def write_part(start: int, end: int, out_path: Path) -> int:
+        def _write(path: Path) -> None:
+            part_reader = _open_pdf(src)
+            writer = PdfWriter()
+            try:
+                # append 는 해당 쪽에 걸린 목차(북마크)까지 함께 가져온다
+                writer.append(part_reader, pages=(start, end))
+            except Exception:
+                for i in range(start, end):
+                    writer.add_page(part_reader.pages[i])
+            try:
+                if part_reader.metadata:
+                    writer.add_metadata(part_reader.metadata)
+            except Exception:
+                pass
+            with open(path, "wb") as f:
+                writer.write(f)
+            writer.close()
+
+        return _safe_write(_write, out_path)
+
+    est = src.stat().st_size / total
+    result.parts, _ = _pack_units(
+        total, write_part, out_dir, stem, ".pdf", opts.max_bytes,
+        reporter, est, result.warnings, "쪽",
     )
     return result
 
@@ -777,6 +846,8 @@ def split_file(src_path, opts: SplitOptions, reporter: Optional[Reporter] = None
             result = split_excel(src, out_dir, opts, reporter, stem)
         elif ext == ".docx":
             result = split_docx(src, out_dir, opts, reporter, stem)
+        elif ext == ".pdf":
+            result = split_pdf(src, out_dir, opts, reporter, stem)
         else:
             result = split_pptx(src, out_dir, opts, reporter, stem)
     except Cancelled:

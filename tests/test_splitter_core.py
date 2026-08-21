@@ -1,7 +1,7 @@
 """
 분할 엔진 테스트
 =================
-실제로 큰 xlsx / docx / pptx 파일을 만들어 나눈 뒤,
+실제로 큰 xlsx / docx / pptx / pdf 파일을 만들어 나눈 뒤,
   1) 결과 파일들이 모두 지정한 용량 이하인지
   2) 내용이 빠짐없이 들어갔는지
   3) 원본이 그대로인지
@@ -80,6 +80,56 @@ def make_pptx(path, slides=120):
             _rand_text(10, rng)
         )
     prs.save(str(path))
+
+
+def make_pdf(path, pages=60, side=420):
+    """
+    쪽마다 폭이 다른(400+i) 무작위 이미지 PDF.
+    폭이 다르므로 나눈 뒤에도 쪽 순서가 맞는지 정확히 확인할 수 있다.
+    """
+    from PIL import Image
+
+    rng = random.Random(6)
+    images = []
+    for i in range(pages):
+        width = side + i  # 쪽마다 폭을 다르게 (순서 확인용)
+        img = Image.frombytes(
+            "RGB", (width, side),
+            bytes(rng.randrange(256) for _ in range(width * side * 3)),
+        )
+        images.append(img)
+    images[0].save(str(path), save_all=True, append_images=images[1:])
+
+    # 10쪽마다 목차(북마크)를 넣어 둔다 — 나눈 뒤에도 남아 있는지 확인용
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(str(path))
+    writer = PdfWriter()
+    writer.append(reader)
+    for i in range(0, pages, 10):
+        writer.add_outline_item(f"{i + 1}쪽 구간", i)
+    with open(path, "wb") as f:
+        writer.write(f)
+
+
+def verify_pdf(pages, side=420):
+    def _verify(result):
+        from pypdf import PdfReader
+
+        widths = []
+        bookmarks = 0
+        for part in result.parts:
+            reader = PdfReader(str(part))
+            for page in reader.pages:
+                widths.append(round(float(page.mediabox.width)))
+            bookmarks += len(reader.outline)
+        check(len(widths) == pages, f"쪽이 하나도 빠지지 않았다 ({len(widths)}쪽)")
+        expected = [side + i for i in range(pages)]
+        check(widths == expected, "쪽 순서가 그대로 유지됐다")
+        check(bookmarks == len(range(0, pages, 10)),
+              f"목차(북마크)가 빠짐없이 옮겨졌다 ({bookmarks}개)")
+
+    return _verify
 
 
 def sha256(path):
@@ -296,6 +346,11 @@ def main():
         make_pptx(pptx, slides=120)
         run_case("PPTX", pptx, 200 * 1024, verify_pptx(120))
 
+        # --- PDF
+        pdf = tmp / "설계도면_모음.pdf"
+        make_pdf(pdf, pages=60)
+        run_case("PDF", pdf, 400 * 1024, verify_pdf(60))
+
         # --- 엑셀: 서식 유지 모드
         styled = tmp / "서식표.xlsx"
         make_styled_xlsx(styled, rows=3000, cols=8)
@@ -337,8 +392,9 @@ def main():
         # --- 폴더 수집
         print("\n[폴더 검색]")
         found = collect_office_files(str(tmp))
-        check(all(f.lower().endswith((".xlsx", ".docx", ".pptx")) for f in found),
-              f"폴더에서 Office 파일만 찾아낸다 ({len(found)}개)")
+        check(all(f.lower().endswith((".xlsx", ".docx", ".pptx", ".pdf")) for f in found),
+              f"폴더에서 나눌 수 있는 파일만 찾아낸다 ({len(found)}개)")
+        check(any(f.lower().endswith(".pdf") for f in found), "PDF 도 검색 대상에 들어간다")
 
         print("\n모든 테스트를 통과했습니다.")
     finally:

@@ -1,7 +1,7 @@
 """
 Office 파일 분할기 (Office File Splitter)
 =========================================
-용량이 커서 업로드·첨부할 수 없는 Excel / Word / PowerPoint 파일을,
+용량이 커서 업로드·첨부할 수 없는 Excel / Word / PowerPoint / PDF 파일을,
 사용자가 정한 크기(예: 10MB) 이하의 여러 파일로 나눠 주는 프로그램입니다.
 
 - 원본 파일은 읽기만 하며 절대 수정하지 않습니다.
@@ -209,7 +209,7 @@ class SplitterApp:
         tk.Label(header, text=APP_NAME, bg=C.BG, fg=C.TEXT,
                  font=self.fonts["h1"]).grid(row=0, column=1, sticky="w")
         tk.Label(header,
-                 text="용량이 큰 Excel · Word · PowerPoint 파일을 원하는 크기로 안전하게 나눕니다",
+                 text="용량이 큰 Excel · Word · PowerPoint · PDF 파일을 원하는 크기로 안전하게 나눕니다",
                  bg=C.BG, fg=C.MUTED, font=self.fonts["small"]).grid(row=1, column=1, sticky="w")
 
         badge = tk.Canvas(header, width=132, height=26, bg=C.BG,
@@ -242,7 +242,7 @@ class SplitterApp:
         self.dropzone = DropZone(left, self.add_files, self.fonts, height=104)
         if not self.dnd:
             self.dropzone.title_text = "클릭해서 파일을 선택하세요"
-            self.dropzone.hint_text = "xlsx · xlsm · docx · pptx  파일을 고를 수 있습니다"
+            self.dropzone.hint_text = "xlsx · xlsm · docx · pptx · pdf  파일을 고를 수 있습니다"
         self.dropzone.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         card = Card(left, "파일 목록", fonts=self.fonts)
@@ -503,10 +503,11 @@ class SplitterApp:
         paths = filedialog.askopenfilenames(
             title="나눌 파일 선택",
             filetypes=[
-                ("Office 파일", "*.xlsx *.xlsm *.docx *.pptx"),
+                ("나눌 수 있는 파일", "*.xlsx *.xlsm *.docx *.pptx *.pdf"),
                 ("Excel", "*.xlsx *.xlsm"),
                 ("Word", "*.docx"),
                 ("PowerPoint", "*.pptx"),
+                ("PDF", "*.pdf"),
                 ("모든 파일", "*.*"),
             ],
         )
@@ -537,7 +538,7 @@ class SplitterApp:
             self._log(f"{added}개 파일을 목록에 추가했습니다.", "dim")
         if skipped:
             self._log(f"{skipped}개는 지원하지 않는 형식이라 제외했습니다. "
-                      f"(가능: xlsx, xlsm, docx, pptx)", "warn")
+                      f"(가능: xlsx, xlsm, docx, pptx, pdf)", "warn")
         self._refresh_files()
 
     def remove_selected(self):

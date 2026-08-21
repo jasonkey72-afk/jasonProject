@@ -2,7 +2,7 @@
 화면(GUI) 동작 확인
 ====================
 창을 실제로 띄운 뒤, 사람이 누르는 것과 같은 순서로
-  파일 추가 → 크기 설정 → 분할 시작 → 완료
+  파일 추가(xlsx·docx·pptx·pdf) → 크기 설정 → 분할 시작 → 완료
 를 진행시켜 결과 파일이 만들어지는지 확인한다.
 
 화면이 없는 환경(리눅스 서버 등)에서는 자동으로 건너뛴다.
@@ -23,7 +23,7 @@ except Exception:
     print("tkinter 를 사용할 수 없어 건너뜁니다.")
     raise SystemExit(0)
 
-from test_splitter_core import check, make_docx, make_pptx, make_xlsx  # noqa: E402
+from test_splitter_core import check, make_docx, make_pdf, make_pptx, make_xlsx  # noqa: E402
 
 
 def pump(root, seconds=0.4):
@@ -86,22 +86,24 @@ def main():
         xlsx = tmp / "실적.xlsx"
         docx = tmp / "보고서.docx"
         pptx = tmp / "발표.pptx"
+        pdf = tmp / "도면.pdf"
         make_xlsx(xlsx, rows=6000, cols=8, sheets=1)
         make_docx(docx, paragraphs=1500)
         make_pptx(pptx, slides=40)
+        make_pdf(pdf, pages=20, side=140)
 
         # --- 파일 추가
-        app._add_paths([str(xlsx), str(docx), str(pptx)])
+        app._add_paths([str(xlsx), str(docx), str(pptx), str(pdf)])
         pump(root)
-        check(len(app.files) == 3, "파일 3개가 목록에 들어갔다")
-        check(len(app.tree.get_children()) == 3, "목록 화면에도 3줄이 보인다")
+        check(len(app.files) == 4, "파일 4개가 목록에 들어갔다 (PDF 포함)")
+        check(len(app.tree.get_children()) == 4, "목록 화면에도 4줄이 보인다")
 
         # --- 지원하지 않는 파일은 걸러진다
         other = tmp / "메모.txt"
         other.write_text("hello")
         app._add_paths([str(other)])
         pump(root)
-        check(len(app.files) == 3, "txt 파일은 목록에 추가되지 않는다")
+        check(len(app.files) == 4, "txt 파일은 목록에 추가되지 않는다")
 
         # --- 프리셋/단위 버튼
         app._set_preset("5MB")
@@ -136,9 +138,9 @@ def main():
         check(ok, "작업이 끝까지 진행됐다")
 
         made = sorted(p for p in out.rglob("*") if p.is_file())
-        check(len(made) >= 6, f"결과 파일이 만들어졌다 ({len(made)}개)")
-        check(all(p.stat().st_size <= 100 * 1024 for p in made),
-              "결과 파일이 모두 100KB 이하다")
+        check(len(made) >= 8, f"결과 파일이 만들어졌다 ({len(made)}개)")
+        over = [f"{p.name} {p.stat().st_size}B" for p in made if p.stat().st_size > 100 * 1024]
+        check(not over, f"결과 파일이 모두 100KB 이하다 {over}")
         check(all(f["status"] == "done" for f in app.files), "목록이 완료 표시로 바뀌었다")
         check(app.last_output_dir is not None and app.last_output_dir.exists(),
               "'결과 폴더 열기' 버튼이 가리킬 폴더가 있다")
@@ -150,7 +152,7 @@ def main():
         by_source = {}
         for part in made:
             by_source.setdefault(part.name.split("_part")[0], []).append(part)
-        check(len(by_source) == 3, f"세 파일 모두 나뉘었다 ({sorted(by_source)})")
+        check(len(by_source) == 4, f"네 파일 모두 나뉘었다 ({sorted(by_source)})")
         check(all(len(v) >= 2 for v in by_source.values()), "각 파일이 2개 이상으로 나뉘었다")
 
         # --- 중지 동작
