@@ -149,19 +149,16 @@ class CDPPage:
         """식을 실행한다. by_value=False 면 요소 손잡이(objectId)를 받는다."""
         self._block_if_dialog()
         params = {"expression": expression, "returnByValue": by_value,
-                  "awaitPromise": True}
+                  "awaitPromise": True,
+                  # 사람이 누른 것으로 취급한다. 이게 없으면 스크립트가 여는 새 탭이
+                  # 팝업 차단에 막힌다(자바스크립트 클릭으로 대체 클릭할 때도 마찬가지).
+                  "userGesture": True}
         if context_id is not None:
             params["contextId"] = context_id
-        try:
-            result = self.send("Runtime.evaluate", params, timeout).get("result", {})
-        except CDPError as e:
-            # window.open 처럼 값으로 옮길 수 없는 것(창·DOM 요소)을 돌려주는 경우.
-            # 스크립트 자체는 이미 실행됐으므로 설명만 돌려주고 넘어간다.
-            if by_value and "reference chain" in str(e):
-                params["returnByValue"] = False
-                result = self.send("Runtime.evaluate", params, timeout).get("result", {})
-                return result.get("description") or result.get("className") or ""
-            raise
+        # 여기서 오류가 나도 다시 실행하면 안 된다.
+        # (window.open 같은 스크립트가 두 번 실행되어 탭이 두 개 열린다)
+        # 값으로 옮길 수 없는 결과는 run_script 가 미리 감싸서 막는다.
+        result = self.send("Runtime.evaluate", params, timeout).get("result", {})
         return result if not by_value else result.get("value")
 
     def call_on(self, el: CDPElement, func: str, args: list = None,
@@ -174,6 +171,7 @@ class CDPPage:
             "arguments": [{"value": a} for a in (args or [])],
             "returnByValue": by_value,
             "awaitPromise": True,
+            "userGesture": True,        # 자바스크립트 클릭이 새 탭을 열 수 있게 한다
         }
         result = self.send("Runtime.callFunctionOn", params, timeout).get("result", {})
         return result if not by_value else result.get("value")
@@ -555,6 +553,11 @@ class CDPBrowser:
         # 통지를 놓친 탭은 뒤로 보낸다
         return sorted(pages, key=lambda t: rank.get(t["targetId"], len(rank)))
 
+    def tab_order(self) -> list:
+        """탭이 열린 순서(targetId 목록). 목록 순서와 생성 순서가 달라 따로 관리한다."""
+        self.client.pump()
+        return list(self._order)
+
     def attach(self, target_id: str) -> CDPPage:
         for page in self.pages.values():
             if page.target_id == target_id:
@@ -583,15 +586,25 @@ class CDPBrowser:
             pass
         return self.page
 
-    def follow_new_tab(self, before: int, wait: float = 2.0) -> bool:
-        """클릭 때문에 새 탭이 열렸으면 그 탭으로 옮긴다."""
+    def follow_new_tab(self, before_id: str, wait: float = 2.0) -> bool:
+        """
+        클릭 때문에 **before_id 탭보다 나중에** 새 탭이 열렸으면 그 탭으로 옮긴다.
+        단순히 '탭 수가 늘었는지' 로 판단하면 이미 열려 있던 다른 탭으로
+        잘못 옮겨갈 수 있다.
+        """
+        order_before = self.tab_order()
+        base = order_before.index(before_id) if before_id in order_before else -1
         end = time.time() + wait
         while time.time() < end:
-            targets = self.page_targets()
-            if len(targets) > before:
-                self.page = self.attach(targets[-1]["targetId"])
+            order = self.tab_order()
+            newer = order[base + 1:] if base >= 0 else order
+            live = {t["targetId"] for t in self.page_targets()}
+            newer = [tid for tid in newer if tid in live]
+            if newer:
+                self.page = self.attach(newer[-1])
                 self.page.wait_ready(20)
-                self.log("  · 새 창으로 이동했습니다.")
+                self.log("  · 클릭으로 새 탭이 열려 그 탭으로 이동했습니다: %s"
+                         % (self.page.title or "")[:40])
                 return True
             time.sleep(0.2)
         return False

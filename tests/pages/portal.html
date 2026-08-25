@@ -14,6 +14,14 @@
   <a href="#detail" id="lnk">상세보기</a>
   <div id="res"></div>
 
+  <!-- 사내 시스템에서 자주 보는 형태: 클릭하면 새 탭이 열린다 -->
+  <a id="openTab" href="newtab.html" target="_blank">상세보기(새 탭)</a>
+  <!-- 서버 응답을 기다렸다가 늦게 새 탭을 여는 경우 (자동 추적 시간을 넘긴다) -->
+  <button id="slowOpen"
+          onclick="setTimeout(function () { window.open('newtab.html', '_blank'); }, 3000)">
+    느린 상세보기(3초 뒤 새 탭)
+  </button>
+
   <!-- 최신 웹 컴포넌트(Shadow DOM). 평범한 CSS/XPath로는 안쪽이 보이지 않는다. -->
   <my-widget></my-widget>
   <script>

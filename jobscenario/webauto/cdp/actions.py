@@ -87,8 +87,39 @@ class CDPActions:
         spec = target if isinstance(target, dict) else None
         if spec is None:
             spec = (target if isinstance(target, Target) else parse_target(target)).to_dict()
-        return self.page.find(spec, self.timeout if timeout is None else timeout,
-                              visible_only, log=self.log)
+        try:
+            return self.page.find(spec, self.timeout if timeout is None else timeout,
+                                  visible_only, log=self.log)
+        except ElementNotFound:
+            # 현재 탭에 없으면 다른 탭도 찾아본다.
+            # 버튼을 눌러 새 탭이 열렸는데 자동화는 원래 탭에 남아 있는 경우가 많다.
+            el = self._find_in_other_tabs(spec, visible_only)
+            if el is not None:
+                return el
+            raise
+
+    def _find_in_other_tabs(self, spec: dict, visible_only: bool):
+        """열려 있는 다른 탭을 최근 것부터 훑어보고, 찾으면 그 탭으로 이동한다."""
+        current = self.browser.page
+        current_id = current.target_id if current is not None else None
+        targets = self.browser.page_targets()
+        if len(targets) <= 1:
+            return None
+
+        for info in reversed(targets):          # 가장 최근에 열린 탭부터
+            if info["targetId"] == current_id:
+                continue
+            try:
+                page = self.browser.attach(info["targetId"])
+                page.wait_ready(5)
+                el = page.find(spec, timeout=2.0, visible_only=visible_only)
+            except (ElementNotFound, CDPError):
+                continue
+            self.browser.page = page
+            self.log("  · 현재 탭에 없어 다른 탭에서 찾았습니다 → '%s' 탭으로 이동합니다."
+                     % (page.title or info.get("url", ""))[:40])
+            return el
+        return None
 
     def highlight(self, el: CDPElement):
         try:
@@ -114,8 +145,10 @@ class CDPActions:
         return self.page.wait_ready(timeout)
 
     def click(self, target, timeout=None, new_tab_wait: bool = True):
-        before = len(self.browser.page_targets())
+        # 먼저 대상을 찾는다. 찾는 과정에서 다른 탭으로 옮겨갈 수 있으므로
+        # '클릭 전 탭 수' 는 그 뒤에 세어야 한다.
         el = self.find(target, timeout)
+        before = self.browser.page.target_id if self.browser.page else None
         how = self.page.click(el)
         if how.startswith("js("):
             self.log("  · 다른 요소에 가려져 있어 스크립트로 클릭했습니다.")
@@ -192,9 +225,95 @@ class CDPActions:
         info = self.find(target, timeout).info() or {}
         return (info.get("text") or info.get("value") or "").strip()
 
-    def switch_tab(self, index: int = -1):
-        self.browser.switch_tab(index)
-        return True
+    def switch_tab(self, spec=-1, timeout: float = 10.0):
+        """
+        탭 번호(-1 = 마지막) 또는 제목/주소의 일부로 탭을 고른다.
+        아직 열리지 않았으면 지정한 시간까지 기다린다.
+        """
+        text = str(-1 if spec is None or spec == "" else spec).strip()
+        try:
+            index = int(text)
+        except ValueError:
+            index = None
+
+        end = time.time() + max(timeout, 0.1)
+        first = True
+        while True:
+            targets = self.browser.page_targets()
+            if index is not None:
+                # '마지막 탭' 을 요청했는데 아직 탭이 하나뿐이면, 새 탭이 열리는 중일 수
+                # 있으므로 잠깐 기다려 본다(끝내 안 열리면 지금 탭을 그대로 쓴다).
+                waiting_for_new = (index == -1 and len(targets) < 2
+                                   and (first or time.time() < end))
+                if not waiting_for_new and -len(targets) <= index < len(targets):
+                    self.browser.switch_tab(index)
+                    self.page.wait_ready(20)
+                    return True
+            else:
+                hit = [t for t in targets
+                       if text in (t.get("title") or "") or text in (t.get("url") or "")]
+                if hit:
+                    self.browser.page = self.browser.attach(hit[-1]["targetId"])
+                    self.page.wait_ready(20)
+                    return True
+            first = False
+            if time.time() >= end:
+                if index is not None and self.browser.page_targets():
+                    self.browser.switch_tab(index)      # 새 탭은 안 열렸다 -> 지금 탭 사용
+                    self.page.wait_ready(20)
+                    return True
+                break
+            time.sleep(0.3)
+
+        raise ElementNotFound(
+            "'%s' 에 해당하는 탭을 찾지 못했습니다. 현재 열린 탭: %s"
+            % (text, [(t.get("title") or t.get("url", ""))[:25]
+                      for t in self.browser.page_targets()]))
+
+    def wait_new_tab(self, timeout: float = 15.0, match: str = ""):
+        """
+        새 탭이 열릴 때까지 기다렸다가 그 탭으로 이동한다.
+        클릭이 새 탭을 여는데 그 탭이 늦게 뜨는 경우에 쓴다.
+        이미 새 탭으로 옮겨진 뒤라면 아무 일도 하지 않는다.
+        """
+        current = self.browser.page
+        current_id = current.target_id if current is not None else None
+        end = time.time() + max(timeout, 0.1)
+
+        while True:
+            targets = self.browser.page_targets()
+            newer = self._targets_after(current_id, targets)
+            if match:
+                newer = [t for t in newer
+                         if match in (t.get("title") or "") or match in (t.get("url") or "")]
+            if newer:
+                page = self.browser.attach(newer[-1]["targetId"])
+                page.wait_ready(30)
+                self.browser.page = page
+                self.log("  · 새 탭으로 이동했습니다: %s" % (page.title or "")[:40])
+                return True
+
+            # 이미 가장 최근 탭에 있고 탭이 2개 이상이면, 클릭 직후 자동으로 옮겨진 것이다
+            if len(targets) > 1 and targets and targets[-1]["targetId"] == current_id:
+                self.log("  · 이미 새 탭에 있습니다: %s" % (self.title() or "")[:40])
+                return True
+
+            if time.time() >= end:
+                break
+            time.sleep(0.3)
+
+        raise ElementNotFound(
+            "새 탭이 열리지 않았습니다(%.0f초 기다림). 앞 단계의 클릭이 새 탭을 여는지, "
+            "대기 시간을 늘려야 하는지 확인해 주세요." % timeout)
+
+    def _targets_after(self, current_id, targets: list) -> list:
+        """현재 탭보다 나중에 열린 탭만 골라낸다."""
+        order = self.browser.tab_order()
+        if current_id in order:
+            newer = set(order[order.index(current_id) + 1:])
+        else:
+            newer = set(order)
+        return [t for t in targets if t["targetId"] in newer]
 
     def close_tab(self):
         return self.browser.close_tab()
@@ -209,9 +328,22 @@ class CDPActions:
         (시나리오 파일을 두 엔진이 함께 쓸 수 있어야 한다)
         """
         text = (script or "").strip()
-        if re.search(r"(^|[\n;{])\s*return\b", text):
-            text = "(function () { %s })()" % text
-        return self.page.evaluate(text)
+        if not re.search(r"(^|[\n;{])\s*return\b", text):
+            text = "return (%s);" % text.rstrip(";")
+        # 결과를 항상 값으로 옮길 수 있게 만든다.
+        # 창·DOM 요소를 돌려주는 스크립트(window.open 등)가 오류를 내지 않도록 한다.
+        wrapped = (
+            "(function () {"
+            "  var __v = (function () { %s })();"
+            "  if (__v === undefined || __v === null) { return null; }"
+            "  if (typeof __v === 'object' || typeof __v === 'function') {"
+            "    try { return JSON.parse(JSON.stringify(__v)); }"
+            "    catch (e) { return String(__v); }"
+            "  }"
+            "  return __v;"
+            "})()" % text
+        )
+        return self.page.evaluate(wrapped)
 
     def screenshot(self, path: str):
         return self.page.screenshot(path)

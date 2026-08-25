@@ -229,9 +229,12 @@ class Runner:
             name = (value or "결과").strip()
             self.session.variables[name] = text
             return "%s = %s" % (name, text[:60])
+        if action == "wait_new_tab":
+            web.wait_new_tab(step.timeout or 15, value)
+            return "현재 탭: %s" % web.title()[:50]
         if action == "switch_tab":
-            web.switch_tab(int(value or -1))
-            return ""
+            web.switch_tab(value or -1, step.timeout or 10)
+            return "현재 탭: %s" % web.title()[:50]
         if action == "close_tab":
             web.close_tab()
             return ""
